@@ -13,9 +13,15 @@ import UIKit
 import AVFoundation
 import Photos
 import OSLog
+import Combine // Import Combine framework
 
 // MARK: - Logger
-let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.example.LoneSword", category: "QwenAPI")
+let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.example.LoneSword", category: "ContentView")
+
+// MARK: - Notification Name for Cancellation
+extension Notification.Name {
+    static let cancelWebViewAndSummary = Notification.Name("cancelWebViewAndSummaryNotification")
+}
 
 // MARK: - API Error Enum
 enum APIError: LocalizedError {
@@ -96,10 +102,13 @@ struct QwenStreamChunk: Decodable {
 }
 
 // MARK: - Qwen API Manager
+// Qwen3模型通过enable_thinking参数控制思考过程（开源版默认True，商业版默认False）
+//  使用Qwen3开源版模型时，若未启用流式输出，请将下行取消注释，否则会报错
+// extra_body={"enable_thinking": False},
 struct QwenAPIManager {
     private let endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
     private let modelName = "qwen3-235b-a22b" // Switched to a known model, adjust if needed
-    private let requestTimeout: TimeInterval = 60 // Increased timeout for potentially longer streams
+    private let requestTimeout: TimeInterval = 30 // Increased timeout for potentially longer streams
     private let apiKey = ProcessInfo.processInfo.environment["DASHSCOPE_API_KEY"]
 
     func getAPIKey() -> String? {
@@ -126,19 +135,64 @@ struct QwenAPIManager {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("keep-alive", forHTTPHeaderField: "Connection")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept") // Explicitly accept SSE
+        let prompt = """
+        请根据以下要求对提供的网页内容进行分析总结：
 
-        let prompt = "请对以下从网页提取的文本内容进行总结，提取核心要点：\n\n---\n\(text)\n---"
-        let requestBody = QwenRequest(
+        1. 判断内容是否为AI生成，并简要说明判断依据（如语言模式、逻辑结构、数据来源等）；
+        2. 使用总分结构总结文章的核心观点及分项论点；
+        3. 输出使用 Markdown 格式，格式如下：
+
+        # 一、  此文章**是/不是**AI生成，判断依据：[一句话总结具体分析特征]/n
+
+        # 二、核心观点:/n  
+        [用一句话概括文章主旨]
+        /n
+        ## 三、分项论点解析
+        /n
+        1. **[论点1]**  
+           - 支撑依据：[具体内容]  
+           - 数据/案例：[具体引用]  
+
+        2. **[论点2]**  
+           - 关键论据：[具体分析]  
+           - 逻辑链条：[推导过程]  
+
+        ...
+
+        请严格遵循上述格式要求，确保内容客观准确，分项论点不超过5个，每个论点包含至少两个支撑细节。
+        ：\n\n---\n\(text)\n---
+        """
+        let baseRequestBody = QwenRequest(
             model: modelName,
             messages: [QwenRequest.Message(role: "user", content: prompt)]
-            // stream is true by default in QwenRequest struct
+            // stream is true by default
         )
 
         do {
-            request.httpBody = try JSONEncoder().encode(requestBody)
-            logger.debug("Sending stream request to Qwen API.")
+            // 1. Encode the base request to a dictionary
+            let encoder = JSONEncoder()
+            // encoder.outputFormatting = .prettyPrinted // Optional for debugging
+            let baseData = try encoder.encode(baseRequestBody)
+            guard var requestDict = try JSONSerialization.jsonObject(with: baseData, options: []) as? [String: Any] else {
+                logger.error("Failed to convert base request to dictionary.")
+                throw APIError.invalidResponseFormat // Or a more specific internal error
+            }
+
+            // 2. Add the extra_body parameter
+            // Note: This assumes enable_thinking is always false for this setup.
+            // If it needs to be dynamic, adjust accordingly.
+            requestDict["extra_body"] = ["enable_thinking": false]
+            logger.debug("Added extra_body: [\"enable_thinking\": false] to request dictionary.")
+
+            // 3. Encode the modified dictionary back to Data
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestDict, options: [])
+            logger.debug("Sending stream request to Qwen API with extra_body.")
+
+        } catch let error as EncodingError {
+            logger.error("Failed to encode request body (EncodingError): \(error.localizedDescription)")
+            throw APIError.invalidResponseFormat
         } catch {
-            logger.error("Failed to encode request body: \(error.localizedDescription)")
+            logger.error("Failed to encode or modify request body: \(error.localizedDescription)")
             throw APIError.invalidResponseFormat
         }
 
@@ -228,55 +282,60 @@ struct WebView: UIViewRepresentable {
         webView.isOpaque = false
         // Set the delegate
         webView.navigationDelegate = context.coordinator
-        // Optionally observe progress (though we'll use didFinish)
-        // webView.addObserver(context.coordinator, forKeyPath: #keyPath(WKWebView.estimatedProgress), options: .new, context: nil)
+        // Store a weak reference to the webView instance in the coordinator
+        context.coordinator.webViewInstance = webView
+        logger.debug("makeUIView: Coordinator webViewInstance set.")
         return webView
     }
     
     func updateUIView(_ webView: WKWebView, context: Context) {
         // Only load if the urlString actually changed and is different from current webView URL
         if let url = URL(string: urlString), webView.url?.absoluteString != urlString {
+            // Note: Cancellation is handled via Notification before this point
             let request = URLRequest(url: url)
             logger.info("UpdateUIView: Loading new URL: \(self.urlString)")
+            // Reset coordinator state for the new load
+            context.coordinator.resetExtractionState()
             webView.load(request)
 
             // --- Start: Attempt early text extraction after 3 seconds ---
             let script = "document.body.innerText || document.documentElement.innerText"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak webView, self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak webView, coordinator = context.coordinator, urlString = self.urlString] in // Capture necessary values
                 guard let webView = webView else { return }
                 // Check if the webView is still potentially loading the requested URL
                 // Use contains as the exact URL might change slightly during loading (e.g., redirects)
-                if (webView.url?.absoluteString.contains(self.urlString)) ?? false || webView.isLoading {
-                     logger.info("Attempting EARLY text extraction (3s after load start)...")
-                     webView.evaluateJavaScript(script) { (result, error) in
-                        DispatchQueue.main.async { // Ensure UI update is on main
+                // Also check if an early summarization hasn't already completed for this URL
+                if ((webView.url?.absoluteString.contains(urlString)) ?? false || webView.isLoading) { // && !coordinator.didSummarizeEarly Removed didSummarizeEarly check here
+                    logger.info("Attempting EARLY text extraction (3s after load start)... URL: \(urlString)")
+                    webView.evaluateJavaScript(script) { (result, error) in
+                        // Run processing logic on the main thread
+                        DispatchQueue.main.async {
                             if let error = error {
                                 logger.warning("Early JavaScript evaluation failed: \(error.localizedDescription)")
-                                // Optionally update display text, but might conflict with loading messages
-                                // self.onTextExtracted("Early extraction failed.")
                                 return
                             }
                             if let earlyText = result as? String, !earlyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                logger.info("Early Extracted Text Length: \(earlyText.count)")
-                                // Do not summarize early text, just display it
-                                // self.onTextExtracted("(Early) \(earlyText)")
+                                // Process the extracted early text
+                                coordinator.processExtractedText(earlyText, fromEarlyAttempt: true)
                             } else {
-                                logger.info("No text for early extraction.")
-                                // Don't overwrite loading/error messages with "no text found" here
+                                logger.info("No text found during early extraction attempt.")
+                                // Ensure state reflects no early summary if no text found early
+                                coordinator.didSummarizeEarly = false
                             }
                         }
                     }
                 } else {
-                    logger.info("Skipping early text extraction: URL changed or load finished too quickly.")
+                    logger.info("Skipping early text extraction: URL changed, load finished quickly, or summary already done. Current WebView URL: \(webView.url?.absoluteString ?? "nil") vs Requested: \(urlString)")
                 }
             }
-             // --- End: Attempt early text extraction ---
+            // --- End: Attempt early text extraction ---
 
         } else if urlString.isEmpty && webView.url != nil {
-             // Handle case where urlString is cleared
+             // Handle case where urlString is cleared (also stops loading)
+             webView.stopLoading() // Explicitly stop loading if URL is cleared
+             context.coordinator.resetExtractionState() // Reset state when cleared
              webView.loadHTMLString("<html><body></body></html>", baseURL: nil)
              DispatchQueue.main.async {
-                 // Use weak self here as well if accessing parent properties directly
                  self.onTextExtracted("Enter a URL and tap Slash.")
              }
         }
@@ -290,143 +349,289 @@ struct WebView: UIViewRepresentable {
     class Coordinator: NSObject, WKNavigationDelegate {
         var parent: WebView
         private let apiManager = QwenAPIManager() // Instance of the API manager
+        // Weak reference to the managed WKWebView
+        weak var webViewInstance: WKWebView?
+        // Handle to the potentially running summarization task
+        private var currentSummarizationTask: Task<Void, Never>?
+        
+        // State for early extraction comparison
+        var earlyExtractedText: String? = nil
+        var earlyExtractedLength: Int = 0
+        var didSummarizeEarly: Bool = false
         
         init(_ parent: WebView) {
             self.parent = parent
+            super.init() // Needed for NSObject subclass
+            // Register to observe the cancellation notification
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleCancelNotification(_:)),
+                name: .cancelWebViewAndSummary,
+                object: nil
+            )
+            logger.debug("Coordinator init: Notification observer added.")
+        }
+        
+        deinit {
+            logger.debug("Coordinator deinit: Removing observer and cancelling task.")
+            // Cancel any ongoing task when the Coordinator is deallocated
+            currentSummarizationTask?.cancel()
+            // Remove the notification observer
+            NotificationCenter.default.removeObserver(self, name: .cancelWebViewAndSummary, object: nil)
+        }
+        
+        // Reset state for a new URL load or cancellation
+        func resetExtractionState() {
+            logger.debug("Resetting coordinator extraction state.")
+            earlyExtractedText = nil
+            earlyExtractedLength = 0
+            didSummarizeEarly = false
+            // Cancel any task associated with the previous state
+            currentSummarizationTask?.cancel()
+        }
+        
+        // --- Notification Handler ---
+        @objc private func handleCancelNotification(_ notification: Notification) {
+            logger.info("Cancellation notification received.")
+            DispatchQueue.main.async { // Ensure WKWebView/UI updates are on main thread
+                logger.info("Executing cancellation: Stopping WebView load and cancelling summary task.")
+                self.webViewInstance?.stopLoading()
+                // Reset state upon cancellation
+                self.resetExtractionState()
+                // Optionally update the display text
+                // self.parent.onTextExtracted("Operations cancelled.")
+            }
         }
         
         // --- WKNavigationDelegate Methods ---
         
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-             // Update status when navigation starts
             DispatchQueue.main.async {
-                 // Check if the URL string is valid before showing loading message
-                 if URL(string: self.parent.urlString) != nil {
-                    self.parent.onTextExtracted("Loading \(self.parent.urlString)...")
-                 } else {
-                    // Handle case where an invalid URL might have been passed initially
-                     self.parent.onTextExtracted("Invalid URL provided.")
-                 }
+                if URL(string: self.parent.urlString) != nil {
+                   // Don't reset state here, wait for loadURL or cancellation notice
+                   self.parent.onTextExtracted("Loading \(self.parent.urlString)... ")
+                } else {
+                    self.parent.onTextExtracted("Invalid URL provided.")
+                }
             }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Page finished loading, attempt to extract text immediately
-            logger.info("Page finished loading, attempting text extraction for \(self.parent.urlString)")
-            self.extractTextAndSummarize(from: webView) // Modified call
+            let currentWebViewURL = webView.url?.absoluteString
+            let requestedURL = self.parent.urlString
+            logger.info("Page finished loading. WebView URL: \(currentWebViewURL ?? "nil"), Requested URL: \(requestedURL)")
+
+            // Add checks similar to the early extraction to ensure we process the correct page
+            guard let webViewURL = webView.url, (webViewURL.absoluteString == requestedURL || webViewURL.absoluteString.contains(requestedURL)) else {
+                 logger.warning("didFinish: WebView URL does not match requested URL. Skipping final extraction. WebView: \(currentWebViewURL ?? "nil"), Requested: \(requestedURL)")
+                 return
+            }
+
+            // Check if the task was cancelled
+            if Task.isCancelled { // Consider checking associated task
+                 logger.info("Skipping final text extraction as task seems cancelled.")
+                 return
+            }
+            // Check webView loading state (should be false here, but good practice)
+            guard !webView.isLoading else {
+                logger.info("Skipping final text extraction as webView.isLoading is true (unexpected in didFinish).")
+                return
+            }
+
+            logger.info("Proceeding with final text extraction for: \(requestedURL)")
+            // Evaluate JS to get final text
+            let script = "document.body.innerText || document.documentElement.innerText"
+            webView.evaluateJavaScript(script) { [weak self] (result, error) in
+                guard let self = self else { return }
+                DispatchQueue.main.async { // Ensure UI/state updates are on main thread
+                    if let error = error {
+                        logger.error("Final JavaScript evaluation failed: \(error.localizedDescription)")
+                         self.parent.onTextExtracted("Error extracting final text from page.")
+                        return
+                    }
+                    guard let finalExtractedText = result as? String, !finalExtractedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        logger.warning("No text extracted or result was not a string after page load (didFinish). URL: \(requestedURL)")
+                        // If early summary happened but final is empty, maybe revert?
+                        // For now, just report no text found.
+                        if !self.didSummarizeEarly { // Only update if no early summary is showing
+                             self.parent.onTextExtracted("No text content found on page to summarize.")
+                        }
+                        return
+                    }
+                    // Process the extracted final text
+                    self.processExtractedText(finalExtractedText, fromEarlyAttempt: false)
+                }
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            // Handle navigation errors
-            logger.error("Webview navigation failed: \(error.localizedDescription)")
-            DispatchQueue.main.async {
-                self.parent.onTextExtracted("Error loading page: \(error.localizedDescription)")
-            }
+             let nsError = error as NSError
+             if !(nsError.domain == "WebKitErrorDomain" && nsError.code == 102) {
+                 logger.error("Webview navigation failed: \(error.localizedDescription)")
+                 // Avoid overwriting existing summary/message if cancellation happened
+                 if !Task.isCancelled && !(nsError.code == NSURLErrorCancelled) { // Double check cancellation
+                     DispatchQueue.main.async {
+                         self.parent.onTextExtracted("Error loading page: \(error.localizedDescription)")
+                     }
+                 }
+                 // Reset state on failure? Might depend on the error.
+                 // resetExtractionState()
+             } else {
+                  logger.info("Webview navigation failed with frame load interrupted (code 102), likely due to cancellation.")
+                  // State should have been reset by cancellation handler
+             }
         }
          func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-             // Handle errors that occur before the page starts loading (e.g., server not found)
+             if (error as NSError).code == NSURLErrorCancelled {
+                 logger.info("Webview provisional navigation cancelled (NSURLErrorCancelled), likely normal due to new load or explicit cancel.")
+                 // State should have been reset by loadURL or cancellation handler
+                 return
+             }
              logger.error("Webview provisional navigation failed: \(error.localizedDescription)")
              DispatchQueue.main.async {
-                 self.parent.onTextExtracted("Error loading page: \(error.localizedDescription)")
+                 // Avoid overwriting existing summary/message if cancellation happened
+                 if !Task.isCancelled { // Check cancellation state
+                    self.parent.onTextExtracted("Error loading page: \(error.localizedDescription)")
+                 }
              }
+             // Reset state on failure?
+             // resetExtractionState()
          }
 
-        // --- Text Extraction & AI submit---
-        private func extractTextAndSummarize(from webView: WKWebView) {
-            let script = "document.body.innerText || document.documentElement.innerText"
-            webView.evaluateJavaScript(script) { [weak self] (result, error) in
-                 guard let self = self else { return }
+        // --- Text Processing Logic ---
+        func processExtractedText(_ text: String, fromEarlyAttempt: Bool) {
+            let currentTextLength = text.count
+            let textSnippet = String(text.prefix(100)).replacingOccurrences(of: "\n", with: " ") // For logging
 
-                 if let error = error {
-                     logger.error("JavaScript evaluation failed: \(error.localizedDescription)")
-                      DispatchQueue.main.async {
-                         self.parent.onTextExtracted("Error extracting text from page.")
-                      }
-                     return
-                 }
+            if fromEarlyAttempt {
+                logger.info("Processing EARLY text. Length: \(currentTextLength). Snippet: '\(textSnippet)...'")
+                self.earlyExtractedText = text
+                self.earlyExtractedLength = currentTextLength
 
-                 guard let extractedText = result as? String, !extractedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                     logger.warning("No text extracted or result was not a string after page load.")
-                      DispatchQueue.main.async {
-                         self.parent.onTextExtracted("No text content found on page to summarize.")
-                      }
-                     return
-                 }
+                if currentTextLength > 2000 {
+                    // Only start early summary if one isn't already running/completed for this load cycle
+                    if !self.didSummarizeEarly {
+                        logger.info("Early text length (\(currentTextLength)) > 2000. Starting early summarization.")
+                        self.didSummarizeEarly = true
+                        // Update UI immediately before async task
+                        self.parent.onTextExtracted("Early text > 2000 chars. Summarizing preview...")
+                        // Start the summarization task
+                        submitForSummarization(text: text)
+                    } else {
+                        logger.info("Early text length (\(currentTextLength)) > 2000, but early summarization flag already set. Skipping duplicate early summary.")
+                    }
+                } else {
+                    logger.info("Early text length (\(currentTextLength)) <= 2000. No early summarization triggered.")
+                    // Ensure flag is false if criteria not met early on
+                    self.didSummarizeEarly = false
+                }
+            } else { // Processing final text from didFinish
+                logger.info("Processing FINAL text. Length: \(currentTextLength). Snippet: '\(textSnippet)...'")
 
-                 // Log the extracted text (optional)
-                 // logger.info("Extracted Text: \(extractedText)") 
-                 logger.info("Successfully extracted text, length: \(extractedText.count). Submitting for summarization.")
-
-                 // Update UI to indicate summarization is starting
-                 DispatchQueue.main.async {
-                      self.parent.onTextExtracted("Summarizing extracted text...")
-                 }
-
-                 // Call API manager in a background task
-                 Task {
-                     do {
-                         let summary = try await self.apiManager.summarize(text: extractedText)
-                         logger.info("Summarization successful.")
-                         // Update UI on main thread with the summary
-                         await MainActor.run {
-                             self.parent.onTextExtracted(summary)
-                         }
-                     } catch let error as APIError {
-                         logger.error("Summarization failed: \(error.localizedDescription)")
-                         await MainActor.run {
-                             self.parent.onTextExtracted("Summarization Error: \(error.localizedDescription)")
-                         }
-                     } catch {
-                          logger.error("Unexpected error during summarization: \(error.localizedDescription)")
-                         await MainActor.run {
-                              self.parent.onTextExtracted("An unexpected error occurred during summarization.")
-                         }
-                     }
-                 }
-                 // DO NOT call onTextExtracted here with the raw text
-                 // self.parent.onTextExtracted(extractedText) <-- This was incorrect
+                if self.didSummarizeEarly {
+                    // An early summary was performed. Check length difference.
+                    if currentTextLength > self.earlyExtractedLength * 2 {
+                        logger.info("Final text length (\(currentTextLength)) > 2x early length (\(self.earlyExtractedLength)). Re-summarizing with final text.")
+                        // Update UI immediately before async task
+                        self.parent.onTextExtracted("检测到完整网页文本差异较大，重新进行AI总结...")
+                        // Submit the *final* text for summarization
+                        submitForSummarization(text: text)
+                    } else {
+                        logger.info("Final text length (\(currentTextLength)) not > 2x early length (\(self.earlyExtractedLength)). Keeping early summary.")
+                        // Do nothing, keep the summary already displayed from the early attempt.
+                        // Optionally update display text to confirm? e.g.:
+                        // self.parent.onTextExtracted("完整网页文本与预览相似，保留早期总结。\n---\n" + (currentSummary ?? "")) // Need to store current summary if doing this
+                    }
+                } else {
+                    // No early summary was performed, summarize the final text.
+                    logger.info("No early summary was performed previously. Summarizing final text.")
+                     // Update UI immediately before async task
+                     self.parent.onTextExtracted("Summarizing extracted text...")
+                    // Submit the final text for summarization
+                    submitForSummarization(text: text)
+                }
+                // Resetting state here might be premature if didFinish gets called multiple times?
+                // Consider resetting only when a new load starts or is cancelled.
             }
         }
 
-         // Cleanup observer if you were using KVO for estimatedProgress
-         // deinit {
-         //    // If you added the observer, you must remove it
-         //     // webView.removeObserver(self, forKeyPath: #keyPath(WKWebView.estimatedProgress))
-         // }
+        // --- Submits text for API Summarization ---
+        private func submitForSummarization(text: String) {
+            // Cancel any previous summarization task before starting a new one
+            currentSummarizationTask?.cancel() // Cancel previous task if any
+            logger.debug("submitForSummarization: Previous summary task cancelled (if existed). Starting new task.")
 
-         // KVO method if observing estimatedProgress (alternative to didFinish)
-         /*
-         override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-             if keyPath == #keyPath(WKWebView.estimatedProgress) {
-                 if let webView = object as? WKWebView {
-                     print("Progress: \(webView.estimatedProgress)")
-                     DispatchQueue.main.async {
-                          self.parent.onTextExtracted("Loading... \(Int(webView.estimatedProgress * 100))%")
-                     }
-                     // Trigger extraction near completion (e.g., > 0.95)
-                     // Be cautious, might fire multiple times or not at all if load is fast/fails
-                     if webView.estimatedProgress > 0.95 {
-                          // Maybe add a flag to extract only once per load cycle
-                          // extractText(from: webView)
-                     }
-                 }
-             }
-         }
-         */
+            // Store the handle to the new task
+            self.currentSummarizationTask = Task { // Assign to instance variable
+                do {
+                    // Check for cancellation *before* starting the network request
+                    try Task.checkCancellation()
+                    logger.info("Starting API summarization task for text length: \(text.count).")
+
+                    let summary = try await self.apiManager.summarize(text: text)
+
+                    // Check for cancellation *after* the network request completes
+                    try Task.checkCancellation()
+                    logger.info("Summarization successful.")
+
+                    await MainActor.run { [weak self] in // Use weak self
+                        guard let self = self else { return }
+                        // Final check before UI update
+                        guard !Task.isCancelled else {
+                            logger.info("Summarization task cancelled just before UI update.")
+                            return
+                        }
+                        logger.debug("Updating display text with summary.")
+                        self.parent.onTextExtracted(summary)
+                    }
+                } catch is CancellationError {
+                     logger.info("Summarization Task cancelled.")
+                     // Optionally update UI on main thread to indicate cancellation
+                     // await MainActor.run { [weak self] in self?.parent.onTextExtracted("Summarization cancelled.") }
+                } catch let error as APIError {
+                    logger.error("Summarization failed: \(error.localizedDescription)")
+                    await MainActor.run { [weak self] in // Use weak self
+                        // Check for cancellation before showing error
+                        if !Task.isCancelled {
+                            self?.parent.onTextExtracted("Summarization Error: \(error.localizedDescription)")
+                        }
+                    }
+                } catch {
+                     logger.error("Unexpected error during summarization: \(error.localizedDescription)")
+                    await MainActor.run { [weak self] in // Use weak self
+                         // Check for cancellation before showing error
+                        if !Task.isCancelled {
+                            self?.parent.onTextExtracted("An unexpected error occurred during summarization.")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var searchText: String = "https://www.chinanews.com.cn/cj/2025/05-05/10410615.shtml"
-    @State private var currentURL: String = "https://wallstreetcn.com/live/global" // Initial URL
+    @State private var currentURL: String = "https://www.chinadaily.com.cn/a/202505/05/WS6818d781a310a04af22bd883.html" // Initial URL
     // State variable to hold the text extracted from the web page or status messages
     @State private var displayText: String = "Enter a URL and tap Slash."
-    
+    // State variable to control the summary view expansion
+    @State private var isSummaryExpanded: Bool = false // Changed default to false (collapsed)
+    // State variables for adaptive height calculation
+    @State private var summaryContentHeight: CGFloat = 0
+    @State private var webViewContainerHeight: CGFloat = 0
+
+    // Define collapsed height and estimated padding/button height
+    private let collapsedHeight: CGFloat = 60
+    private let estimatedPaddingAndButtonHeight: CGFloat = 40 // Estimate for padding + button row
+
     var body: some View {
-        VStack(spacing: 15) {
-            // 搜索框和按钮组
+        VStack(spacing: 0) { // Use 0 spacing for manual control
+            // Top Bar: Search Box and Buttons
             HStack(spacing: 15) {
-                // 搜索框
+                // Search Box
                 HStack {
                     TextField("Enter URL here", text: $searchText)
                         .font(.system(size: 16))
@@ -442,9 +647,9 @@ struct ContentView: View {
                 .padding(.vertical, 12)
                 .background(Color(.systemGray6))
                 .cornerRadius(10)
-                
-                // Slash按钮
-                Button(action: loadURL) { // Action now calls loadURL
+
+                // Slash Button
+                Button(action: loadURL) {
                     Text("Slash")
                         .font(.system(size: 18, weight: .medium))
                         .foregroundColor(.white)
@@ -452,70 +657,166 @@ struct ContentView: View {
                         .background(Color.orange)
                         .cornerRadius(8)
                 }
-                
-                // 功能按钮组 (Kept for layout, actions can be added later)
+
+                // Feature Buttons (Placeholder)
                 HStack(spacing: 10) {
-                    Button(action: { }) { Text("识别AI生成").buttonStyle() }
-                    Button(action: { }) { Text("AI总结").buttonStyle() }
                     Button(action: { }) { Text("翻译").buttonStyle() }
                 }
             }
             .padding(.horizontal, 20)
-            
-            // 紫色文字显示区域
-            ScrollView {
-                Text(displayText) // Display the state variable here
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(red: 0.6, green: 0.5, blue: 0.8))
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(red: 0.95, green: 0.95, blue: 1.0))
-                    .cornerRadius(8)
-            }
-            .frame(height: 100) // Increased height slightly for more text
-            .padding(.horizontal, 20)
-            
-            // WKWebView 显示区域
-            WebView(urlString: $currentURL, onTextExtracted: { text in
-                // This closure is called by the Coordinator
-                self.displayText = text
-            })
-                .background(Color.white)
-                .cornerRadius(8)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
+            .padding(.vertical, 10) // Adjusted padding
+            .background(Color(red: 0.95, green: 0.95, blue: 0.95)) // Give top bar its background
+            .zIndex(1) // Ensure top bar stays above ZStack content
+
+            // Main Content Area: WebView overlaid by Summary View
+            // Use GeometryReader to get the height available for ZStack content
+            GeometryReader { geometry in
+                ZStack(alignment: .top) {
+                    // WebView (takes up space below top bar)
+                    WebView(urlString: $currentURL, onTextExtracted: { text in
+                        self.displayText = text
+                    })
+                    .background(Color.white) // WebView background
+
+                    // Floating Summary View Container
+                    VStack(spacing: 0) {
+                        ScrollView {
+                            // Wrap Text in a VStack for proper GeometryReader measurement
+                            VStack {
+                                Text(try! AttributedString(markdown: displayText) ?? AttributedString(displayText))
+                                    // Increase font size and add line spacing
+                                    .font(.system(size: 18)) // Increased font size
+                                    .lineSpacing(8) // Increased line spacing
+                                    // Apply bold and blue color
+                                    .bold() 
+                                    .foregroundColor(.blue) // Changed from purple to blue
+                                    .padding() // Apply padding *inside* measurement
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    // Measure the height of the Text content
+                                    .background(GeometryReader { textGeo in
+                                        Color.clear // Needs a view for the background
+                                            .onAppear { // Update height when it appears
+                                                self.summaryContentHeight = textGeo.size.height
+                                            }
+                                            .onChange(of: displayText) { _, _ in // Update height when text changes
+                                                // Need slight delay or ensure update happens after layout pass
+                                                DispatchQueue.main.async {
+                                                    self.summaryContentHeight = textGeo.size.height
+                                                }
+                                            }
+                                    })
+                            }
+                        }
+                        // .background(...) // Removed inner background
+
+                        // Button positioned at the bottom-right of this VStack
+                        HStack {
+                            Spacer() // Pushes button to the right
+                            Button(action: {
+                                withAnimation(.easeInOut) { // Add animation
+                                    isSummaryExpanded.toggle()
+                                }
+                            }) {
+                                Text(isSummaryExpanded ? "收起" : "展开")
+                                    .font(.system(size: 12))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .foregroundColor(.white)
+                                    .background(Color.gray.opacity(0.5))
+                                    .cornerRadius(5)
+                            }
+                        }
+                        .padding(.trailing, 8)
+                        .padding(.bottom, 4)
+                        // .background(...) // Removed inner background
+
+                    }
+                    // Calculate dynamic height
+                    .frame(height: calculateFloatingViewHeight(containerHeight: geometry.size.height))
+                    .background(.regularMaterial) // Semi-transparent background effect
+                    .cornerRadius(10)
+                    .shadow(radius: 5)
+                    .padding(.horizontal, 20) // Horizontal padding for the floating view
+                    .padding(.top, 10) // Space below the top bar
+
+                } // End ZStack
+                .onAppear {
+                    // Store the container height when ZStack appears
+                    self.webViewContainerHeight = geometry.size.height
+                }
+                .onChange(of: geometry.size.height) { _, newHeight in
+                    // Update container height if it changes (e.g., rotation)
+                     self.webViewContainerHeight = newHeight
+                }
+            } // End GeometryReader for ZStack
         }
-        .padding(.top, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(red: 0.95, green: 0.95, blue: 0.95))
-        // Update display text when the view appears based on initial URL
+        .background(Color(red: 0.95, green: 0.95, blue: 0.95)) // Overall background
+        .edgesIgnoringSafeArea(.bottom) // Allow content to go to bottom edge
         .onAppear { checkAPIKeyAndSetInitialMessage() }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                checkPasteboardForURL()
+            }
+        }
+        // Add onReceive to check pasteboard whenever its content changes while app is active
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in
+            // Check pasteboard only if the app is currently active
+            if scenePhase == .active {
+                checkPasteboardForURL()
+            }
+        }
     }
     
+    // Function to calculate the floating view's height
+    private func calculateFloatingViewHeight(containerHeight: CGFloat) -> CGFloat {
+        if isSummaryExpanded {
+            // Calculate the max allowed height (half of the container)
+            let maxHeight = containerHeight / 2
+            // Calculate the desired content height (measured text + padding/button)
+            let desiredHeight = summaryContentHeight + estimatedPaddingAndButtonHeight
+            // Return the minimum of the desired height and the max height
+            // Also ensure a minimum reasonable height if content is very short
+            return max(collapsedHeight, min(desiredHeight, maxHeight))
+        } else {
+            // Return the fixed collapsed height
+            return collapsedHeight
+        }
+    }
+
     // Function to load the URL
     private func loadURL() {
         var urlToLoad = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if urlToLoad.isEmpty {
-             logger.info("Search text is empty.")
-             displayText = "Please enter a URL."
-             return
+            logger.info("Search text is empty.")
+            // Maybe clear display text or show a message?
+            // displayText = "Please enter a URL."
+            return // Don't proceed if empty
         }
         if !urlToLoad.hasPrefix("http://") && !urlToLoad.hasPrefix("https://") {
             urlToLoad = "https://" + urlToLoad
         }
-        
-        if let _ = URL(string: urlToLoad) {
-            // Set loading status *before* updating URL to trigger WebView reload
-            // Note: The Coordinator's didStartProvisionalNavigation will likely overwrite this message quickly.
-            // displayText = "Preparing to load \(urlToLoad)..."
 
+        // Check if the URL is the same as the current one
+        if urlToLoad == currentURL {
+            logger.info("Attempted to load the same URL (\(urlToLoad)). No action taken.")
+            return // Do nothing if the URL hasn't changed
+        }
+
+        // --- If URL is different, proceed with cancellation and loading ---
+
+        // Post notification FIRST to cancel ongoing WebView loading and API calls
+        NotificationCenter.default.post(name: .cancelWebViewAndSummary, object: nil)
+        logger.info("Posted cancellation notification.")
+
+        // Validate the potentially modified URL
+        if let _ = URL(string: urlToLoad) {
             // Update the URL, which will trigger WebView updateUIView
             currentURL = urlToLoad
             logger.info("Loading URL: \(self.currentURL)")
-            
         } else {
-            logger.warning("Invalid URL entered: \(self.searchText)")
-            displayText = "Invalid URL: \(searchText)"
+            // This case should be less likely now due to prefixing logic, but keep for safety
+            logger.warning("Invalid URL after processing: \(urlToLoad)")
+            displayText = "Invalid URL: \(searchText)" // Show original input in error
         }
     }
 
@@ -529,6 +830,33 @@ struct ContentView: View {
              } else {
                  displayText = "Enter a valid URL and tap Slash."
              }
+        }
+    }
+
+    // --- New Function to Check Pasteboard ---
+    private func checkPasteboardForURL() {
+        // Check if pasteboard has a string
+        guard let pastedString = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines), !pastedString.isEmpty else {
+            // logger.debug("Pasteboard does not contain a non-empty string.")
+            return
+        }
+
+        // Basic URL validation: Check if it can be parsed and has http/https scheme
+        guard let url = URL(string: pastedString),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme) else {
+            // logger.debug("Pasteboard string '\(pastedString)' is not a valid HTTP/HTTPS URL.")
+            return
+        }
+
+        // Check if the valid URL from pasteboard is different from the current text
+        if pastedString != searchText {
+            logger.info("Found valid URL in pasteboard: \(pastedString). Updating searchText.")
+            searchText = pastedString
+            // Optionally, you could also immediately trigger loadURL() here if desired
+            // loadURL()
+        } else {
+            // logger.debug("Pasteboard URL '\(pastedString)' is the same as current searchText. No update needed.")
         }
     }
 }
