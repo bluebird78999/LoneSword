@@ -29,9 +29,22 @@
 		37D066912D7F4AD900DDF723 /* LoneSwordUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LoneSwordUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		377B3EF32DC933F2006FDA15 /* Exceptions for "LoneSword" folder in "LoneSword" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 37D066742D7F4AD600DDF723 /* LoneSword */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		37D066772D7F4AD600DDF723 /* LoneSword */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				377B3EF32DC933F2006FDA15 /* Exceptions for "LoneSword" folder in "LoneSword" target */,
+			);
 			path = LoneSword;
 			sourceTree = "<group>";
 		};
@@ -399,6 +412,7 @@
 				DEVELOPMENT_TEAM = GCA63MZHFF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LoneSword/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = LoneSword;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -434,6 +448,7 @@
 				DEVELOPMENT_TEAM = GCA63MZHFF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LoneSword/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = LoneSword;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

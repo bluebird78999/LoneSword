@@ -21,6 +21,7 @@ let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.example.Lone
 // MARK: - Notification Name for Cancellation
 extension Notification.Name {
     static let cancelWebViewAndSummary = Notification.Name("cancelWebViewAndSummaryNotification")
+    static let translateWebPage = Notification.Name("translateWebPageNotification")
 }
 
 // MARK: - API Error Enum
@@ -275,6 +276,8 @@ struct WebView: UIViewRepresentable {
     @Binding var urlString: String
     // Callback to pass extracted text back to ContentView
     var onTextExtracted: (String) -> Void
+    // Callback to handle link clicks
+    var onLinkClicked: ((String) -> Void)?
     
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
@@ -289,56 +292,130 @@ struct WebView: UIViewRepresentable {
     }
     
     func updateUIView(_ webView: WKWebView, context: Context) {
-        // Only load if the urlString actually changed and is different from current webView URL
-        if let url = URL(string: urlString), webView.url?.absoluteString != urlString {
-            // Note: Cancellation is handled via Notification before this point
-            let request = URLRequest(url: url)
-            logger.info("UpdateUIView: Loading new URL: \(self.urlString)")
-            // Reset coordinator state for the new load
-            context.coordinator.resetExtractionState()
-            webView.load(request)
-
-            // --- Start: Attempt early text extraction after 3 seconds ---
-            let script = "document.body.innerText || document.documentElement.innerText"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak webView, coordinator = context.coordinator, urlString = self.urlString] in // Capture necessary values
-                guard let webView = webView else { return }
-                // Check if the webView is still potentially loading the requested URL
-                // Use contains as the exact URL might change slightly during loading (e.g., redirects)
-                // Also check if an early summarization hasn't already completed for this URL
-                if ((webView.url?.absoluteString.contains(urlString)) ?? false || webView.isLoading) { // && !coordinator.didSummarizeEarly Removed didSummarizeEarly check here
-                    logger.info("Attempting EARLY text extraction (3s after load start)... URL: \(urlString)")
-                    webView.evaluateJavaScript(script) { (result, error) in
-                        // Run processing logic on the main thread
-                        DispatchQueue.main.async {
-                            if let error = error {
-                                logger.warning("Early JavaScript evaluation failed: \(error.localizedDescription)")
-                                return
-                            }
-                            if let earlyText = result as? String, !earlyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                // Process the extracted early text
-                                coordinator.processExtractedText(earlyText, fromEarlyAttempt: true)
-                            } else {
-                                logger.info("No text found during early extraction attempt.")
-                                // Ensure state reflects no early summary if no text found early
-                                coordinator.didSummarizeEarly = false
-                            }
-                        }
-                    }
-                } else {
-                    logger.info("Skipping early text extraction: URL changed, load finished quickly, or summary already done. Current WebView URL: \(webView.url?.absoluteString ?? "nil") vs Requested: \(urlString)")
+        // Handle empty URL string case
+        if urlString.isEmpty {
+            // Only clear webView if it currently has content
+            if webView.url != nil {
+                logger.info("UpdateUIView: Clearing webView content due to empty URL")
+                webView.stopLoading()
+                context.coordinator.resetExtractionState()
+                webView.loadHTMLString("<html><body></body></html>", baseURL: nil)
+                DispatchQueue.main.async {
+                    self.onTextExtracted("Enter a URL and tap Slash.")
                 }
             }
-            // --- End: Attempt early text extraction ---
-
-        } else if urlString.isEmpty && webView.url != nil {
-             // Handle case where urlString is cleared (also stops loading)
-             webView.stopLoading() // Explicitly stop loading if URL is cleared
-             context.coordinator.resetExtractionState() // Reset state when cleared
-             webView.loadHTMLString("<html><body></body></html>", baseURL: nil)
-             DispatchQueue.main.async {
-                 self.onTextExtracted("Enter a URL and tap Slash.")
-             }
+            return
         }
+        
+        // Process non-empty URL
+        if let url = URL(string: urlString) {
+            // Log current states for debugging
+            logger.info("UpdateUIView called with urlString: \(urlString)")
+            logger.info("Current webView.url: \(webView.url?.absoluteString ?? "nil")")
+            
+            // Check if we need to load a new URL
+            // Consider URLs different if:
+            // 1. webView has no URL loaded
+            // 2. The base URLs are different (ignoring trailing slashes and schemes variations)
+            let shouldLoad: Bool
+            if let currentURL = webView.url {
+                let normalizedCurrent = normalizeURL(currentURL.absoluteString)
+                let normalizedNew = normalizeURL(urlString)
+                shouldLoad = normalizedCurrent != normalizedNew
+                logger.info("Normalized current: \(normalizedCurrent), Normalized new: \(normalizedNew), shouldLoad: \(shouldLoad)")
+            } else {
+                shouldLoad = true
+                logger.info("WebView has no URL, shouldLoad: true")
+            }
+            
+            if shouldLoad {
+                logger.info("UpdateUIView: Loading new URL: \(self.urlString)")
+                // Stop any current loading first
+                webView.stopLoading()
+                // Reset coordinator state for the new load
+                context.coordinator.resetExtractionState()
+                // Cancel any pending early extraction
+                context.coordinator.cancelEarlyExtraction()
+                
+                // Start new loading session
+                let sessionId = context.coordinator.startNewLoadingSession()
+                
+                // Load the new URL
+                let request = URLRequest(url: url)
+                webView.load(request)
+
+                // --- Start: Attempt early text extraction after 3 seconds ---
+                let script = "document.body.innerText || document.documentElement.innerText"
+                
+                // Create cancellable work item for early extraction
+                let workItem = DispatchWorkItem { [weak webView, weak coordinator = context.coordinator, urlString = self.urlString, sessionId] in
+                    guard let webView = webView, let coordinator = coordinator else { return }
+                    
+                    // Check if session is still valid
+                    guard coordinator.isSessionValid(sessionId) else {
+                        logger.info("Early extraction cancelled: session invalid")
+                        return
+                    }
+                    
+                    // Check if the webView is still potentially loading the requested URL
+                    if ((webView.url?.absoluteString.contains(urlString)) ?? false || webView.isLoading) {
+                        logger.info("Attempting EARLY text extraction (3s after load start)... URL: \(urlString)")
+                        webView.evaluateJavaScript(script) { (result, error) in
+                            DispatchQueue.main.async {
+                                // Verify session again after async operation
+                                guard coordinator.isSessionValid(sessionId) else {
+                                    logger.info("Early extraction result discarded: session invalid")
+                                    return
+                                }
+                                
+                                if let error = error {
+                                    logger.warning("Early JavaScript evaluation failed: \(error.localizedDescription)")
+                                    return
+                                }
+                                if let earlyText = result as? String, !earlyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    // Process the extracted early text
+                                    coordinator.processExtractedText(earlyText, fromEarlyAttempt: true, sessionId: sessionId)
+                                } else {
+                                    logger.info("No text found during early extraction attempt.")
+                                    // Ensure state reflects no early summary if no text found early
+                                    coordinator.didSummarizeEarly = false
+                                }
+                            }
+                        }
+                    } else {
+                        logger.info("Skipping early text extraction: URL changed, load finished quickly, or summary already done. Current WebView URL: \(webView.url?.absoluteString ?? "nil") vs Requested: \(urlString)")
+                    }
+                }
+                
+                // Store and execute the work item
+                context.coordinator.setEarlyExtractionWorkItem(workItem)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: workItem)
+                // --- End: Attempt early text extraction ---
+            } else {
+                logger.debug("UpdateUIView: URL unchanged, skipping load. Current: \(webView.url?.absoluteString ?? "nil")")
+            }
+        } else {
+            logger.warning("UpdateUIView: Invalid URL string: \(urlString)")
+            DispatchQueue.main.async {
+                self.onTextExtracted("Invalid URL format")
+            }
+        }
+    }
+    
+    // Helper function to normalize URLs for comparison
+    private func normalizeURL(_ urlString: String) -> String {
+        var normalized = urlString.lowercased()
+        // Remove trailing slashes
+        if normalized.hasSuffix("/") {
+            normalized = String(normalized.dropLast())
+        }
+        // Remove www. prefix if present
+        normalized = normalized.replacingOccurrences(of: "://www.", with: "://")
+        // Remove fragment identifiers
+        if let fragmentRange = normalized.range(of: "#") {
+            normalized = String(normalized[..<fragmentRange.lowerBound])
+        }
+        return normalized
     }
     
     // Coordinator to handle potential future delegates
@@ -353,6 +430,10 @@ struct WebView: UIViewRepresentable {
         weak var webViewInstance: WKWebView?
         // Handle to the potentially running summarization task
         private var currentSummarizationTask: Task<Void, Never>?
+        
+        // Session management for better cancellation control
+        private var currentLoadingSession: UUID?
+        private var earlyExtractionWorkItem: DispatchWorkItem?
         
         // State for early extraction comparison
         var earlyExtractedText: String? = nil
@@ -369,15 +450,69 @@ struct WebView: UIViewRepresentable {
                 name: .cancelWebViewAndSummary,
                 object: nil
             )
-            logger.debug("Coordinator init: Notification observer added.")
+            // Register to observe the translation notification
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleTranslateNotification(_:)),
+                name: .translateWebPage,
+                object: nil
+            )
+            logger.debug("Coordinator init: Notification observers added.")
         }
         
         deinit {
-            logger.debug("Coordinator deinit: Removing observer and cancelling task.")
-            // Cancel any ongoing task when the Coordinator is deallocated
-            currentSummarizationTask?.cancel()
-            // Remove the notification observer
+            logger.debug("Coordinator deinit: Removing observers and cancelling all operations.")
+            cancelAllOperations()
             NotificationCenter.default.removeObserver(self, name: .cancelWebViewAndSummary, object: nil)
+            NotificationCenter.default.removeObserver(self, name: .translateWebPage, object: nil)
+        }
+        
+        // Start a new loading session and return its ID
+        func startNewLoadingSession() -> UUID {
+            let newSession = UUID()
+            currentLoadingSession = newSession
+            logger.info("Started new loading session: \(newSession)")
+            return newSession
+        }
+        
+        // Check if a session is still valid
+        func isSessionValid(_ session: UUID?) -> Bool {
+            guard let session = session else { return false }
+            return currentLoadingSession == session
+        }
+        
+        // Cancel all ongoing operations
+        func cancelAllOperations() {
+            logger.info("Cancelling all operations")
+            
+            // Cancel WebView loading
+            webViewInstance?.stopLoading()
+            
+            // Cancel early extraction
+            cancelEarlyExtraction()
+            
+            // Cancel summarization task
+            currentSummarizationTask?.cancel()
+            currentSummarizationTask = nil
+            
+            // Reset all states
+            resetExtractionState()
+            
+            // Invalidate current session
+            currentLoadingSession = nil
+        }
+        
+        // Cancel early extraction task
+        func cancelEarlyExtraction() {
+            earlyExtractionWorkItem?.cancel()
+            earlyExtractionWorkItem = nil
+        }
+        
+        // Set new early extraction work item
+        func setEarlyExtractionWorkItem(_ workItem: DispatchWorkItem) {
+            // Cancel any existing work item first
+            cancelEarlyExtraction()
+            earlyExtractionWorkItem = workItem
         }
         
         // Reset state for a new URL load or cancellation
@@ -386,24 +521,235 @@ struct WebView: UIViewRepresentable {
             earlyExtractedText = nil
             earlyExtractedLength = 0
             didSummarizeEarly = false
-            // Cancel any task associated with the previous state
-            currentSummarizationTask?.cancel()
         }
         
         // --- Notification Handler ---
         @objc private func handleCancelNotification(_ notification: Notification) {
             logger.info("Cancellation notification received.")
-            DispatchQueue.main.async { // Ensure WKWebView/UI updates are on main thread
-                logger.info("Executing cancellation: Stopping WebView load and cancelling summary task.")
-                self.webViewInstance?.stopLoading()
-                // Reset state upon cancellation
-                self.resetExtractionState()
-                // Optionally update the display text
-                // self.parent.onTextExtracted("Operations cancelled.")
+            // Get new session ID from notification if provided
+            let newSession = notification.object as? UUID
+            
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                // Cancel all operations
+                self.cancelAllOperations()
+                
+                // If new session provided, set it
+                if let session = newSession {
+                    self.currentLoadingSession = session
+                    logger.info("Set new session from notification: \(session)")
+                }
+                
+                // Update display text
+                self.parent.onTextExtracted("正在取消之前的操作...")
+            }
+        }
+        
+        @objc private func handleTranslateNotification(_ notification: Notification) {
+            logger.info("Translation notification received.")
+            
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.extractAndTranslateContent()
+            }
+        }
+        
+        // 提取并翻译网页内容
+        private func extractAndTranslateContent() {
+            guard let webView = webViewInstance else {
+                logger.error("WebView instance is nil")
+                parent.onTextExtracted("翻译失败：WebView未准备好")
+                return
+            }
+            
+            // JavaScript代码：获取所有文本节点并标记它们
+            let extractScript = """
+            (function() {
+                var textNodes = [];
+                var nodeIndex = 0;
+                
+                function getTextNodes(node) {
+                    if (node.nodeType === 3 && node.textContent.trim()) {
+                        // 检测是否包含非中文字符（排除空白字符）
+                        var text = node.textContent.trim();
+                        if (text && !/^[\\u4e00-\\u9fff\\s\\d\\p{P}]+$/u.test(text)) {
+                            node.setAttribute = function(name, value) {
+                                if (name === 'data-translation-id') {
+                                    var span = document.createElement('span');
+                                    span.setAttribute('data-translation-id', value);
+                                    node.parentNode.replaceChild(span, node);
+                                    span.appendChild(node);
+                                }
+                            };
+                            node.setAttribute('data-translation-id', nodeIndex);
+                            textNodes.push({
+                                id: nodeIndex,
+                                text: text
+                            });
+                            nodeIndex++;
+                        }
+                    } else if (node.nodeType === 1) {
+                        for (var i = 0; i < node.childNodes.length; i++) {
+                            getTextNodes(node.childNodes[i]);
+                        }
+                    }
+                }
+                
+                getTextNodes(document.body);
+                return textNodes;
+            })();
+            """
+            
+            webView.evaluateJavaScript(extractScript) { [weak self] (result, error) in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    logger.error("Failed to extract text nodes: \(error.localizedDescription)")
+                    self.parent.onTextExtracted("翻译失败：无法提取页面文本")
+                    return
+                }
+                
+                guard let textNodes = result as? [[String: Any]], !textNodes.isEmpty else {
+                    logger.info("No non-Chinese text found to translate")
+                    self.parent.onTextExtracted("未找到需要翻译的非中文文本")
+                    return
+                }
+                
+                logger.info("Found \(textNodes.count) text nodes to translate")
+                
+                // 批量翻译文本
+                self.translateTextNodes(textNodes)
+            }
+        }
+        
+        // 批量翻译文本节点
+        private func translateTextNodes(_ textNodes: [[String: Any]]) {
+            // 提取所有文本
+            var textsToTranslate: [(id: Int, text: String)] = []
+            for node in textNodes {
+                if let id = node["id"] as? Int,
+                   let text = node["text"] as? String {
+                    textsToTranslate.append((id: id, text: text))
+                }
+            }
+            
+            // 构建翻译请求的prompt
+            let textsOnly = textsToTranslate.map { $0.text }
+            let combinedText = textsOnly.enumerated().map { "[\($0.offset)]: \($0.element)" }.joined(separator: "\n")
+            
+            let prompt = """
+            请将以下编号的文本翻译成中文，保持编号格式不变，直接返回翻译结果：
+            
+            \(combinedText)
+            """
+            
+            // 显示翻译进度
+            parent.onTextExtracted("正在翻译 \(textsToTranslate.count) 段文本...")
+            
+            // 使用现有的API管理器进行翻译
+            Task { [weak self] in
+                guard let self = self else { return }
+                
+                do {
+                    let translationResult = try await self.apiManager.summarize(text: prompt)
+                    
+                    // 解析翻译结果
+                    let translations = self.parseTranslations(translationResult, originalTexts: textsToTranslate)
+                    
+                    // 应用翻译到网页
+                    await MainActor.run {
+                        self.applyTranslations(translations)
+                    }
+                } catch {
+                    logger.error("Translation failed: \(error.localizedDescription)")
+                    await MainActor.run {
+                        self.parent.onTextExtracted("翻译失败: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+        
+        // 解析翻译结果
+        private func parseTranslations(_ result: String, originalTexts: [(id: Int, text: String)]) -> [Int: String] {
+            var translations: [Int: String] = [:]
+            
+            let lines = result.components(separatedBy: .newlines)
+            for line in lines {
+                // 匹配格式 [数字]: 翻译文本
+                if let match = line.firstMatch(of: /\[(\d+)\]:\s*(.+)/) {
+                    if let id = Int(match.1) {
+                        translations[id] = String(match.2).trimmingCharacters(in: .whitespaces)
+                    }
+                }
+            }
+            
+            // 如果某些文本没有翻译结果，保持原文
+            for (id, _) in originalTexts {
+                if translations[id] == nil {
+                    logger.warning("No translation found for text id \(id)")
+                }
+            }
+            
+            return translations
+        }
+        
+        // 应用翻译到网页
+        private func applyTranslations(_ translations: [Int: String]) {
+            guard let webView = webViewInstance else { return }
+            
+            // 生成JavaScript代码来替换文本
+            var jsCode = "(() => {\n"
+            for (id, translation) in translations {
+                let escapedTranslation = translation
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "'", with: "\\'")
+                    .replacingOccurrences(of: "\n", with: "\\n")
+                
+                jsCode += """
+                var element = document.querySelector('[data-translation-id="\(id)"]');
+                if (element && element.firstChild && element.firstChild.nodeType === 3) {
+                    element.firstChild.textContent = '\(escapedTranslation)';
+                }
+                
+                """
+            }
+            jsCode += "})();"
+            
+            webView.evaluateJavaScript(jsCode) { [weak self] (_, error) in
+                if let error = error {
+                    logger.error("Failed to apply translations: \(error.localizedDescription)")
+                    self?.parent.onTextExtracted("应用翻译时出错")
+                } else {
+                    logger.info("Successfully applied \(translations.count) translations")
+                    self?.parent.onTextExtracted("翻译完成：已翻译 \(translations.count) 段文本")
+                }
             }
         }
         
         // --- WKNavigationDelegate Methods ---
+        
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            // 检查是否是用户点击链接
+            if navigationAction.navigationType == .linkActivated {
+                if let url = navigationAction.request.url {
+                    logger.info("用户点击了链接: \(url.absoluteString)")
+                    
+                    // 取消默认的导航行为，因为我们将通过loadURL来处理
+                    decisionHandler(.cancel)
+                    
+                    // 确保在主线程上更新UI并触发loadURL
+                    DispatchQueue.main.async {
+                        // 通过调用parent的闭包来触发ContentView中的loadURL
+                        self.parent.onLinkClicked?(url.absoluteString)
+                    }
+                    return
+                }
+            }
+            
+            // 其他类型的导航（如初始加载、表单提交等）允许进行
+            decisionHandler(.allow)
+        }
         
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             DispatchQueue.main.async {
@@ -421,17 +767,32 @@ struct WebView: UIViewRepresentable {
             let requestedURL = self.parent.urlString
             logger.info("Page finished loading. WebView URL: \(currentWebViewURL ?? "nil"), Requested URL: \(requestedURL)")
 
-            // Add checks similar to the early extraction to ensure we process the correct page
-            guard let webViewURL = webView.url, (webViewURL.absoluteString == requestedURL || webViewURL.absoluteString.contains(requestedURL)) else {
-                 logger.warning("didFinish: WebView URL does not match requested URL. Skipping final extraction. WebView: \(currentWebViewURL ?? "nil"), Requested: \(requestedURL)")
-                 return
+            // Check session validity
+            guard let session = currentLoadingSession else {
+                logger.info("didFinish: No active session, skipping extraction")
+                return
+            }
+            
+            guard isSessionValid(session) else {
+                logger.info("didFinish: Session invalid, skipping extraction")
+                return
             }
 
-            // Check if the task was cancelled
-            if Task.isCancelled { // Consider checking associated task
-                 logger.info("Skipping final text extraction as task seems cancelled.")
-                 return
+            // Use more strict URL matching
+            guard let webViewURL = webView.url else {
+                logger.warning("didFinish: WebView URL is nil")
+                return
             }
+            
+            // Use normalized URL comparison
+            let normalizedWebViewURL = parent.normalizeURL(webViewURL.absoluteString)
+            let normalizedRequestedURL = parent.normalizeURL(requestedURL)
+            
+            guard normalizedWebViewURL == normalizedRequestedURL else {
+                logger.warning("didFinish: Normalized URL mismatch. WebView: \(normalizedWebViewURL), Requested: \(normalizedRequestedURL)")
+                return
+            }
+
             // Check webView loading state (should be false here, but good practice)
             guard !webView.isLoading else {
                 logger.info("Skipping final text extraction as webView.isLoading is true (unexpected in didFinish).")
@@ -441,12 +802,18 @@ struct WebView: UIViewRepresentable {
             logger.info("Proceeding with final text extraction for: \(requestedURL)")
             // Evaluate JS to get final text
             let script = "document.body.innerText || document.documentElement.innerText"
-            webView.evaluateJavaScript(script) { [weak self] (result, error) in
+            webView.evaluateJavaScript(script) { [weak self, session] (result, error) in
                 guard let self = self else { return }
                 DispatchQueue.main.async { // Ensure UI/state updates are on main thread
+                    // Verify session again
+                    guard self.isSessionValid(session) else {
+                        logger.info("Final extraction cancelled: session invalid")
+                        return
+                    }
+                    
                     if let error = error {
                         logger.error("Final JavaScript evaluation failed: \(error.localizedDescription)")
-                         self.parent.onTextExtracted("Error extracting final text from page.")
+                         self.parent.onTextExtracted("提取页面文本时出错")
                         return
                     }
                     guard let finalExtractedText = result as? String, !finalExtractedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -454,12 +821,12 @@ struct WebView: UIViewRepresentable {
                         // If early summary happened but final is empty, maybe revert?
                         // For now, just report no text found.
                         if !self.didSummarizeEarly { // Only update if no early summary is showing
-                             self.parent.onTextExtracted("No text content found on page to summarize.")
+                             self.parent.onTextExtracted("页面没有找到可总结的文本内容")
                         }
                         return
                     }
                     // Process the extracted final text
-                    self.processExtractedText(finalExtractedText, fromEarlyAttempt: false)
+                    self.processExtractedText(finalExtractedText, fromEarlyAttempt: false, sessionId: session)
                 }
             }
         }
@@ -481,7 +848,8 @@ struct WebView: UIViewRepresentable {
                   // State should have been reset by cancellation handler
              }
         }
-         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
              if (error as NSError).code == NSURLErrorCancelled {
                  logger.info("Webview provisional navigation cancelled (NSURLErrorCancelled), likely normal due to new load or explicit cancel.")
                  // State should have been reset by loadURL or cancellation handler
@@ -496,10 +864,18 @@ struct WebView: UIViewRepresentable {
              }
              // Reset state on failure?
              // resetExtractionState()
-         }
+        }
 
         // --- Text Processing Logic ---
-        func processExtractedText(_ text: String, fromEarlyAttempt: Bool) {
+        func processExtractedText(_ text: String, fromEarlyAttempt: Bool, sessionId: UUID? = nil) {
+            // Verify session if provided
+            if let sessionId = sessionId {
+                guard isSessionValid(sessionId) else {
+                    logger.info("processExtractedText cancelled: session invalid")
+                    return
+                }
+            }
+            
             let currentTextLength = text.count
             let textSnippet = String(text.prefix(100)).replacingOccurrences(of: "\n", with: " ") // For logging
 
@@ -514,9 +890,9 @@ struct WebView: UIViewRepresentable {
                         logger.info("Early text length (\(currentTextLength)) > 2000. Starting early summarization.")
                         self.didSummarizeEarly = true
                         // Update UI immediately before async task
-                        self.parent.onTextExtracted("Early text > 2000 chars. Summarizing preview...")
-                        // Start the summarization task
-                        submitForSummarization(text: text)
+                        self.parent.onTextExtracted("检测到文本长度 > 2000 字符，正在进行预览总结...")
+                        // Start the summarization task with session ID
+                        submitForSummarization(text: text, sessionId: sessionId)
                     } else {
                         logger.info("Early text length (\(currentTextLength)) > 2000, but early summarization flag already set. Skipping duplicate early summary.")
                     }
@@ -535,73 +911,103 @@ struct WebView: UIViewRepresentable {
                         // Update UI immediately before async task
                         self.parent.onTextExtracted("检测到完整网页文本差异较大，重新进行AI总结...")
                         // Submit the *final* text for summarization
-                        submitForSummarization(text: text)
+                        submitForSummarization(text: text, sessionId: sessionId)
                     } else {
                         logger.info("Final text length (\(currentTextLength)) not > 2x early length (\(self.earlyExtractedLength)). Keeping early summary.")
                         // Do nothing, keep the summary already displayed from the early attempt.
-                        // Optionally update display text to confirm? e.g.:
-                        // self.parent.onTextExtracted("完整网页文本与预览相似，保留早期总结。\n---\n" + (currentSummary ?? "")) // Need to store current summary if doing this
                     }
                 } else {
                     // No early summary was performed, summarize the final text.
                     logger.info("No early summary was performed previously. Summarizing final text.")
                      // Update UI immediately before async task
-                     self.parent.onTextExtracted("Summarizing extracted text...")
+                     self.parent.onTextExtracted("正在总结提取的文本...")
                     // Submit the final text for summarization
-                    submitForSummarization(text: text)
+                    submitForSummarization(text: text, sessionId: sessionId)
                 }
-                // Resetting state here might be premature if didFinish gets called multiple times?
-                // Consider resetting only when a new load starts or is cancelled.
             }
         }
 
         // --- Submits text for API Summarization ---
-        private func submitForSummarization(text: String) {
+        private func submitForSummarization(text: String, sessionId: UUID? = nil) {
             // Cancel any previous summarization task before starting a new one
             currentSummarizationTask?.cancel() // Cancel previous task if any
             logger.debug("submitForSummarization: Previous summary task cancelled (if existed). Starting new task.")
 
             // Store the handle to the new task
-            self.currentSummarizationTask = Task { // Assign to instance variable
+            self.currentSummarizationTask = Task { [weak self] in // Use weak self from the start
+                guard let self = self else { return }
+                
                 do {
                     // Check for cancellation *before* starting the network request
                     try Task.checkCancellation()
+                    
+                    // Verify session if provided
+                    if let sessionId = sessionId {
+                        guard self.isSessionValid(sessionId) else {
+                            logger.info("Summarization cancelled: session invalid")
+                            return
+                        }
+                    }
+                    
                     logger.info("Starting API summarization task for text length: \(text.count).")
 
                     let summary = try await self.apiManager.summarize(text: text)
 
                     // Check for cancellation *after* the network request completes
                     try Task.checkCancellation()
+                    
+                    // Verify session again after network request
+                    if let sessionId = sessionId {
+                        guard self.isSessionValid(sessionId) else {
+                            logger.info("Summarization result discarded: session invalid")
+                            return
+                        }
+                    }
+                    
                     logger.info("Summarization successful.")
 
-                    await MainActor.run { [weak self] in // Use weak self
-                        guard let self = self else { return }
+                    await MainActor.run {
                         // Final check before UI update
                         guard !Task.isCancelled else {
                             logger.info("Summarization task cancelled just before UI update.")
                             return
                         }
+                        
+                        // Verify session one more time
+                        if let sessionId = sessionId {
+                            guard self.isSessionValid(sessionId) else {
+                                logger.info("Summarization UI update cancelled: session invalid")
+                                return
+                            }
+                        }
+                        
                         logger.debug("Updating display text with summary.")
                         self.parent.onTextExtracted(summary)
                     }
                 } catch is CancellationError {
                      logger.info("Summarization Task cancelled.")
-                     // Optionally update UI on main thread to indicate cancellation
-                     // await MainActor.run { [weak self] in self?.parent.onTextExtracted("Summarization cancelled.") }
                 } catch let error as APIError {
                     logger.error("Summarization failed: \(error.localizedDescription)")
-                    await MainActor.run { [weak self] in // Use weak self
+                    await MainActor.run {
                         // Check for cancellation before showing error
                         if !Task.isCancelled {
-                            self?.parent.onTextExtracted("Summarization Error: \(error.localizedDescription)")
+                            // Also check session validity
+                            if let sessionId = sessionId, !self.isSessionValid(sessionId) {
+                                return
+                            }
+                            self.parent.onTextExtracted("总结错误: \(error.localizedDescription)")
                         }
                     }
                 } catch {
                      logger.error("Unexpected error during summarization: \(error.localizedDescription)")
-                    await MainActor.run { [weak self] in // Use weak self
+                    await MainActor.run {
                          // Check for cancellation before showing error
                         if !Task.isCancelled {
-                            self?.parent.onTextExtracted("An unexpected error occurred during summarization.")
+                            // Also check session validity
+                            if let sessionId = sessionId, !self.isSessionValid(sessionId) {
+                                return
+                            }
+                            self.parent.onTextExtracted("总结时发生意外错误")
                         }
                     }
                 }
@@ -612,25 +1018,36 @@ struct WebView: UIViewRepresentable {
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
-
-    @State private var searchText: String = "https://www.chinanews.com.cn/cj/2025/05-05/10410615.shtml"
-    @State private var currentURL: String = "https://www.chinadaily.com.cn/a/202505/05/WS6818d781a310a04af22bd883.html" // Initial URL
-    // State variable to hold the text extracted from the web page or status messages
-    @State private var displayText: String = "Enter a URL and tap Slash."
-    // State variable to control the summary view expansion
-    @State private var isSummaryExpanded: Bool = false // Changed default to false (collapsed)
-    // State variables for adaptive height calculation
+    
+    @State private var searchText: String = "https://9to5mac.com/2025/05/29/when-are-new-macs-coming/"
+    @State private var currentURL: String = "https://9to5mac.com/2025/05/29/when-are-new-macs-coming/" // 设置初始URL
+    @State private var displayText: String = "正在加载初始页面..."
+    @State private var isSummaryExpanded: Bool = false
     @State private var summaryContentHeight: CGFloat = 0
     @State private var webViewContainerHeight: CGFloat = 0
+    
+    // URL历史记录管理
+    @State private var urlHistory: [String] = ["https://9to5mac.com/2025/05/29/when-are-new-macs-coming/"] // 添加初始URL到历史记录
+    @State private var currentHistoryIndex: Int = 0 // 设置初始索引
+    @State private var isHistoryNavigation: Bool = false
+    
+    // 计算前进后退按钮的状态
+    private var canGoBack: Bool {
+        return currentHistoryIndex > 0
+    }
+    
+    private var canGoForward: Bool {
+        return currentHistoryIndex < urlHistory.count - 1
+    }
 
     // Define collapsed height and estimated padding/button height
     private let collapsedHeight: CGFloat = 60
     private let estimatedPaddingAndButtonHeight: CGFloat = 40 // Estimate for padding + button row
 
     var body: some View {
-        VStack(spacing: 0) { // Use 0 spacing for manual control
+        VStack(spacing: 0) {
             // Top Bar: Search Box and Buttons
-            HStack(spacing: 15) {
+            HStack(spacing: 8) {
                 // Search Box
                 HStack {
                     TextField("Enter URL here", text: $searchText)
@@ -643,24 +1060,54 @@ struct ContentView: View {
                             loadURL()
                         }
                 }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
                 .background(Color(.systemGray6))
                 .cornerRadius(10)
+
+                // 后退按钮
+                Button(action: goBack) {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 40, height: 40)
+                        .background(canGoBack ? Color.orange : Color.gray)
+                        .cornerRadius(8)
+                }
+                .disabled(!canGoBack)
 
                 // Slash Button
                 Button(action: loadURL) {
                     Text("Slash")
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.white)
-                        .frame(width: 60, height: 44)
+                        .frame(width: 54, height: 40)
                         .background(Color.orange)
                         .cornerRadius(8)
                 }
 
+                // 前进按钮
+                Button(action: goForward) {
+                    Image(systemName: "chevron.forward")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 40, height: 40)
+                        .background(canGoForward ? Color.orange : Color.gray)
+                        .cornerRadius(8)
+                }
+                .disabled(!canGoForward)
+
                 // Feature Buttons (Placeholder)
-                HStack(spacing: 10) {
-                    Button(action: { }) { Text("翻译").buttonStyle() }
+                HStack(spacing: 6) {
+                    Button(action: translatePage) { 
+                        Text("翻译")
+                            .font(.system(size: 14, weight: .medium))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.orange)
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                    }
                 }
             }
             .padding(.horizontal, 20)
@@ -675,6 +1122,19 @@ struct ContentView: View {
                     // WebView (takes up space below top bar)
                     WebView(urlString: $currentURL, onTextExtracted: { text in
                         self.displayText = text
+                    }, onLinkClicked: { url in
+                        // 处理链接点击
+                        logger.info("ContentView - 链接被点击: \(url)")
+                        
+                        // 重置历史导航标志
+                        self.isHistoryNavigation = false
+                        
+                        // 更新搜索框文本
+                        self.searchText = url
+                        
+                        // 调用loadURL来加载新链接
+                        logger.info("ContentView - 调用loadURL加载: \(url)")
+                        self.loadURL()
                     })
                     .background(Color.white) // WebView background
 
@@ -752,7 +1212,13 @@ struct ContentView: View {
         }
         .background(Color(red: 0.95, green: 0.95, blue: 0.95)) // Overall background
         .edgesIgnoringSafeArea(.bottom) // Allow content to go to bottom edge
-        .onAppear { checkAPIKeyAndSetInitialMessage() }
+        .onAppear { 
+            checkAPIKeyAndSetInitialMessage()
+            // 确保在视图出现时加载初始URL
+            if currentURL.isEmpty {
+                currentURL = searchText
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 checkPasteboardForURL()
@@ -785,51 +1251,74 @@ struct ContentView: View {
 
     // Function to load the URL
     private func loadURL() {
+        logger.info("=== Starting new URL load ===")
+        logger.info("Called from: \(Thread.isMainThread ? "Main Thread" : "Background Thread")")
+        
         var urlToLoad = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if urlToLoad.isEmpty {
             logger.info("Search text is empty.")
-            // Maybe clear display text or show a message?
-            // displayText = "Please enter a URL."
-            return // Don't proceed if empty
+            displayText = "请输入一个URL"
+            return
         }
+        
+        // Standardize URL
         if !urlToLoad.hasPrefix("http://") && !urlToLoad.hasPrefix("https://") {
             urlToLoad = "https://" + urlToLoad
         }
+        logger.info("urlToLoad: \(urlToLoad)")
+        logger.info("currentURL before update: \(currentURL)")
+        logger.info("isHistoryNavigation: \(isHistoryNavigation)")
 
-        // Check if the URL is the same as the current one
-        if urlToLoad == currentURL {
-            logger.info("Attempted to load the same URL (\(urlToLoad)). No action taken.")
-            return // Do nothing if the URL hasn't changed
-        }
+        // Generate new session ID
+        let newSession = UUID()
+        logger.info("Generated new session ID: \(newSession)")
 
-        // --- If URL is different, proceed with cancellation and loading ---
+        // Post notification with session ID to cancel ongoing operations
+        NotificationCenter.default.post(name: .cancelWebViewAndSummary, object: newSession)
+        logger.info("Posted cancellation notification with new session")
+        
+        // Update UI immediately
+        displayText = "正在加载: \(urlToLoad)..."
 
-        // Post notification FIRST to cancel ongoing WebView loading and API calls
-        NotificationCenter.default.post(name: .cancelWebViewAndSummary, object: nil)
-        logger.info("Posted cancellation notification.")
-
-        // Validate the potentially modified URL
-        if let _ = URL(string: urlToLoad) {
-            // Update the URL, which will trigger WebView updateUIView
-            currentURL = urlToLoad
-            logger.info("Loading URL: \(self.currentURL)")
+        // Validate and update URL
+        if let validatedURL = URL(string: urlToLoad) {
+            logger.info("URL validation successful: \(validatedURL.absoluteString)")
+            
+            // 更新历史记录（仅在非历史导航时）
+            if !isHistoryNavigation {
+                // 如果当前不在历史记录的末尾，删除当前位置之后的所有记录
+                if currentHistoryIndex < urlHistory.count - 1 {
+                    urlHistory.removeSubrange((currentHistoryIndex + 1)..<urlHistory.count)
+                }
+                
+                // 添加新URL到历史记录
+                urlHistory.append(urlToLoad)
+                currentHistoryIndex = urlHistory.count - 1
+                logger.info("URL added to history. History count: \(urlHistory.count), Current index: \(currentHistoryIndex)")
+            } else {
+                logger.info("History navigation - not adding to history")
+            }
+            
+            // 立即更新currentURL
+            self.currentURL = urlToLoad
+            logger.info("currentURL updated to: \(self.currentURL)")
+            
         } else {
-            // This case should be less likely now due to prefixing logic, but keep for safety
             logger.warning("Invalid URL after processing: \(urlToLoad)")
-            displayText = "Invalid URL: \(searchText)" // Show original input in error
+            displayText = "无效的URL: \(searchText)"
         }
     }
 
     private func checkAPIKeyAndSetInitialMessage() {
         if ProcessInfo.processInfo.environment["DASHSCOPE_API_KEY"] == nil {
-             displayText = "⚠️ Error: DASHSCOPE_API_KEY environment variable not set. Summarization disabled."
-             logger.critical("DASHSCOPE_API_KEY not found in environment variables!")
+            displayText = "⚠️ Error: DASHSCOPE_API_KEY environment variable not set. Summarization disabled."
+            logger.critical("DASHSCOPE_API_KEY not found in environment variables!")
         } else {
-             if URL(string: currentURL) != nil {
-                 displayText = "Initial page loaded. Enter a new URL or tap Slash to reload and summarize."
-             } else {
-                 displayText = "Enter a valid URL and tap Slash."
-             }
+            // 确保初始URL被加载
+            if currentURL.isEmpty {
+                currentURL = searchText
+            }
+            displayText = "正在加载初始页面..."
         }
     }
 
@@ -853,11 +1342,43 @@ struct ContentView: View {
         if pastedString != searchText {
             logger.info("Found valid URL in pasteboard: \(pastedString). Updating searchText.")
             searchText = pastedString
-            // Optionally, you could also immediately trigger loadURL() here if desired
-            // loadURL()
+             loadURL()
         } else {
             // logger.debug("Pasteboard URL '\(pastedString)' is the same as current searchText. No update needed.")
         }
+    }
+
+    // 后退功能
+    private func goBack() {
+        guard canGoBack else { return }
+        currentHistoryIndex -= 1
+        let previousURL = urlHistory[currentHistoryIndex]
+        searchText = previousURL
+        logger.info("Going back to: \(previousURL)")
+        isHistoryNavigation = true
+        loadURL()
+        isHistoryNavigation = false
+    }
+    
+    // 前进功能
+    private func goForward() {
+        guard canGoForward else { return }
+        currentHistoryIndex += 1
+        let nextURL = urlHistory[currentHistoryIndex]
+        searchText = nextURL
+        logger.info("Going forward to: \(nextURL)")
+        isHistoryNavigation = true
+        loadURL()
+        isHistoryNavigation = false
+    }
+    
+    // 翻译页面功能
+    private func translatePage() {
+        logger.info("Translate button clicked")
+        displayText = "正在翻译页面..."
+        
+        // 发送通知给WebView的Coordinator来执行翻译
+        NotificationCenter.default.post(name: .translateWebPage, object: nil)
     }
 }
 
