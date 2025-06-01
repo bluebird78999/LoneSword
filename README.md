@@ -1,4 +1,7 @@
-# LoneSword 浏览器
+# LoneSword 
+![icon-1024](https://github.com/user-attachments/assets/ce694f23-46db-46a4-9c7e-a0ae6a1cfbe4)
+
+
 LoneSword: An Efficient Information Browsing Tool for Discerning Truth in the AI Era.
 
 用AI对抗AI时代的网络熵增,一个基于SwiftUI和WebKit的现代iOS浏览器应用，当前只完成浏览器基本功能，AI功能开发中。
