@@ -1,5 +1,6 @@
 # LoneSword 浏览器
 LoneSword: An Efficient Information Browsing Tool for Discerning Truth in the AI Era.
+
 用AI对抗AI时代的网络熵增,一个基于SwiftUI和WebKit的现代iOS浏览器应用，当前只完成浏览器基本功能，AI功能开发中。
 
 ## 功能特性
@@ -89,7 +90,7 @@ if !urlString.contains(".") || urlString.contains(" ") {
 - `hello world` → Google搜索"hello world"
 - `https://example.com` → 直接加载
 
-### 功能选项
+### 功能选项（还未实现功能）
 - **翻译**: 启用网页翻译功能
 - **AI总结**: 启用AI内容总结
 - **AI判别**: 启用AI内容判别
@@ -126,16 +127,6 @@ LoneSword/
 - 流畅的动画过渡
 - 键盘友好的输入体验
 
-## 开发者说明
-
-### 扩展功能
-可以轻松扩展以下功能：
-- 书签管理
-- 下载管理
-- 标签页支持
-- 隐私模式
-- 自定义搜索引擎
-
 ### 自定义选项
 三个多选项功能可以根据需要实现具体逻辑：
 ```swift
@@ -153,5 +144,3 @@ MIT协议！
 欢迎提交Issue和Pull Request来改进这个项目。
 
 ---
-
-**LoneSword Browser** - 简洁、智能、现代的iOS浏览器体验 
