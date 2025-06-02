@@ -8,6 +8,11 @@ LoneSword: An Efficient Information Browsing Tool for Discerning Truth in the AI
 - **智能地址栏**: 自动格式化域名，根据需要添加 `http://`、`https://`、`www.`
 - **导航按钮**: 前进/后退按钮，有历史记录时显示蓝色可点击，无历史时显示灰色不可点击
 - **Slash按钮**: 蓝色按钮，点击时停止当前加载并开始加载地址栏中的URL
+- **UserAgent切换**: 多模式循环切换按钮，支持4种不同的UserAgent
+  - **SF** (蓝色): Safari UserAgent，与iOS Safari完全相同
+  - **LS** (橙色): LoneSword Browser UserAgent，自定义品牌标识
+  - **CI** (绿色): Chrome iOS UserAgent，模拟iOS版Chrome浏览器
+  - **CP** (红色): Chrome PC UserAgent，模拟Windows版Chrome浏览器
 - **多选项功能**: 三个可选功能（翻译、AI总结、AI判别），默认未选中，选中时显示蓝色勾选状态
 - **进度条**: 顶部2像素的网页加载进度条，从屏幕最左侧到最右侧，根据加载百分比动态调整
 
@@ -57,6 +62,39 @@ if !urlString.contains(".") || urlString.contains(" ") {
 }
 ```
 
+### UserAgent 管理
+```swift
+// UserAgent类型枚举
+enum UserAgentType: Int, CaseIterable {
+    case safari = 0      // Safari UserAgent
+    case loneSword = 1   // LoneSword Browser UserAgent  
+    case chromeIOS = 2   // Chrome iOS UserAgent
+    case chromePC = 3    // Chrome PC UserAgent
+}
+
+// 动态设备信息获取
+class DeviceInfo {
+    var iosVersion: String { UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_") }
+    var isIPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+    
+    var safariUserAgent: String {
+        if isIPad {
+            return "Mozilla/5.0 (iPad; CPU OS \(iosVersion) like Mac OS X) AppleWebKit/605.1.15..."
+        } else {
+            return "Mozilla/5.0 (iPhone; CPU iPhone OS \(iosVersion) like Mac OS X) AppleWebKit/605.1.15..."
+        }
+    }
+}
+
+// 循环切换 UserAgent
+func toggleUserAgent() {
+    let allCases = UserAgentType.allCases
+    let currentIndex = allCases.firstIndex(of: currentUserAgentType) ?? 0
+    let nextIndex = (currentIndex + 1) % allCases.count
+    currentUserAgentType = allCases[nextIndex]
+}
+```
+
 ## 安装和运行
 
 ### 系统要求
@@ -82,6 +120,15 @@ if !urlString.contains(".") || urlString.contains(" ") {
 2. 按回车键或点击"Slash"按钮开始加载
 3. 使用前进/后退按钮导航历史记录
 4. 观察顶部进度条了解加载状态
+
+### UserAgent 管理
+1. 点击工具栏中的 UserAgent 按钮循环切换不同模式
+2. **SF** (蓝色): Safari UserAgent，网站识别为iOS Safari浏览器
+3. **LS** (橙色): LoneSword Browser UserAgent，网站识别为LoneSword浏览器
+4. **CI** (绿色): Chrome iOS UserAgent，网站识别为iOS版Chrome浏览器
+5. **CP** (红色): Chrome PC UserAgent，网站识别为Windows版Chrome浏览器
+6. iOS版本的UserAgent会自动获取当前设备的真实信息（设备型号、iOS版本等）
+7. 可以访问 `localhost:8080/test_useragent.html` 测试UserAgent效果
 
 ### 智能输入示例
 - `google.com` → `https://www.google.com`
@@ -114,6 +161,13 @@ LoneSword/
 - 仅在加载时显示（0% < 进度 < 100%）
 - 平滑动画效果
 - 加载完成后自动隐藏
+
+### 🔧 UserAgent 管理
+- **四模式循环切换**: Safari → LoneSword → Chrome iOS → Chrome PC
+- **智能设备识别**: iOS版本UserAgent自动获取真实设备信息
+- **实时生效**: 切换后立即应用到所有新请求
+- **视觉指示**: SF(蓝色) / LS(橙色) / CI(绿色) / CP(红色) 按钮状态清晰
+- **兼容性优先**: 默认使用Safari UserAgent确保最佳兼容性
 
 ### 🔄 内存管理
 - 使用weak引用避免循环引用

@@ -7,6 +7,8 @@
 
 import SwiftUI
 import WebKit
+import UIKit
+import Foundation
 
 struct ContentView: View {
     @StateObject private var browserViewModel = BrowserViewModel()
@@ -133,6 +135,18 @@ struct BrowserToolbar: View {
             // 增加额外间距
             Spacer()
                 .frame(width: 8)
+            
+            // UserAgent切换按钮
+            Button(action: {
+                viewModel.toggleUserAgent()
+            }) {
+                Text(viewModel.currentUserAgentType.displayName)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 28, height: 24)
+                    .background(viewModel.currentUserAgentType.color)
+                    .cornerRadius(4)
+            }
             
             // 三个复选框
             CheckboxView(isChecked: $viewModel.option1, label: "翻译")
@@ -305,8 +319,8 @@ struct WebViewContainer: UIViewRepresentable {
             webView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
         ])
         
-        // 先设置webView引用
-        viewModel.webView = webView
+        // 设置webView引用并初始化UserAgent
+        viewModel.setWebView(webView)
         
         // 保存refreshControl引用到coordinator
         context.coordinator.refreshControl = refreshControl
@@ -452,6 +466,41 @@ struct WebViewContainer: UIViewRepresentable {
     }
 }
 
+// UserAgent类型枚举
+enum UserAgentType: Int, CaseIterable {
+    case safari = 0
+    case loneSword = 1
+    case chromeIOS = 2
+    case chromePC = 3
+    
+    var displayName: String {
+        switch self {
+        case .safari: return "SF"
+        case .loneSword: return "LS"
+        case .chromeIOS: return "CI"
+        case .chromePC: return "CP"
+        }
+    }
+    
+    var fullName: String {
+        switch self {
+        case .safari: return "Safari"
+        case .loneSword: return "LoneSword Browser"
+        case .chromeIOS: return "Chrome iOS"
+        case .chromePC: return "Chrome PC"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .safari: return .blue
+        case .loneSword: return .orange
+        case .chromeIOS: return .green
+        case .chromePC: return .red
+        }
+    }
+}
+
 // 浏览器视图模型
 class BrowserViewModel: ObservableObject {
     @Published var currentURL: URL?
@@ -465,10 +514,56 @@ class BrowserViewModel: ObservableObject {
     @Published var option2: Bool = false
     @Published var option3: Bool = false
     
+    // UserAgent相关属性
+    @Published var currentUserAgentType: UserAgentType = .safari
+    
     weak var webView: WKWebView?
     
     // 下拉刷新回调
     var onPullToRefresh: (() -> Void)?
+    
+    // 设备信息
+    private let deviceInfo = DeviceInfo()
+    
+    /// 获取当前应该使用的UserAgent
+    func getCurrentUserAgent() -> String {
+        switch currentUserAgentType {
+        case .safari:
+            return deviceInfo.safariUserAgent
+        case .loneSword:
+            return deviceInfo.loneSwordUserAgent
+        case .chromeIOS:
+            return deviceInfo.chromeIOSUserAgent
+        case .chromePC:
+            return deviceInfo.chromePCUserAgent
+        }
+    }
+    
+    /// 切换到下一个UserAgent类型
+    func toggleUserAgent() {
+        let allCases = UserAgentType.allCases
+        let currentIndex = allCases.firstIndex(of: currentUserAgentType) ?? 0
+        let nextIndex = (currentIndex + 1) % allCases.count
+        currentUserAgentType = allCases[nextIndex]
+        
+        updateWebViewUserAgent()
+        print("🔄 UserAgent已切换为: \(currentUserAgentType.fullName)")
+    }
+    
+    /// 更新WebView的UserAgent
+    private func updateWebViewUserAgent() {
+        guard let webView = webView else { return }
+        
+        let userAgent = getCurrentUserAgent()
+        webView.customUserAgent = userAgent
+        print("📱 WebView UserAgent已更新: \(userAgent)")
+    }
+    
+    /// 设置WebView引用并初始化UserAgent
+    func setWebView(_ webView: WKWebView) {
+        self.webView = webView
+        updateWebViewUserAgent()
+    }
     
     func loadURL(_ urlString: String) {
         guard !urlString.isEmpty else { return }
@@ -531,6 +626,102 @@ class BrowserViewModel: ObservableObject {
         }
         
         return urlString
+    }
+}
+
+// 设备信息类
+class DeviceInfo {
+    // 获取设备型号
+    var deviceModel: String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machineMirror = Mirror(reflecting: systemInfo.machine)
+        let identifier = machineMirror.children.reduce("") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return identifier }
+            return identifier + String(UnicodeScalar(UInt8(value)))
+        }
+        
+        // 将机器标识符转换为友好的设备名称
+        switch identifier {
+        case "iPhone14,7": return "iPhone 13 mini"
+        case "iPhone14,8": return "iPhone 13"
+        case "iPhone14,2": return "iPhone 13 Pro"
+        case "iPhone14,3": return "iPhone 13 Pro Max"
+        case "iPhone15,4": return "iPhone 14"
+        case "iPhone15,5": return "iPhone 14 Plus"
+        case "iPhone15,2": return "iPhone 14 Pro"
+        case "iPhone15,3": return "iPhone 14 Pro Max"
+        case "iPhone16,1": return "iPhone 15"
+        case "iPhone16,2": return "iPhone 15 Plus"
+        case "iPhone16,3": return "iPhone 15 Pro"
+        case "iPhone16,4": return "iPhone 15 Pro Max"
+        case "iPad13,1", "iPad13,2": return "iPad Air (5th generation)"
+        case "iPad14,1", "iPad14,2": return "iPad mini (6th generation)"
+        case "iPad13,4", "iPad13,5", "iPad13,6", "iPad13,7": return "iPad Pro (11-inch) (5th generation)"
+        case "iPad13,8", "iPad13,9", "iPad13,10", "iPad13,11": return "iPad Pro (12.9-inch) (5th generation)"
+        default:
+            // 如果是模拟器或未知设备，返回通用名称
+            if identifier.contains("iPhone") {
+                return "iPhone"
+            } else if identifier.contains("iPad") {
+                return "iPad"
+            } else {
+                return "iOS Device"
+            }
+        }
+    }
+    
+    // 获取iOS版本
+    var iosVersion: String {
+        let version = UIDevice.current.systemVersion
+        return version.replacingOccurrences(of: ".", with: "_")
+    }
+    
+    // 获取iOS版本（点分格式）
+    var iosVersionDot: String {
+        return UIDevice.current.systemVersion
+    }
+    
+    // 判断是否为iPad
+    var isIPad: Bool {
+        return UIDevice.current.userInterfaceIdiom == .pad
+    }
+    
+    // 获取WebKit版本（固定值，因为无法动态获取）
+    var webKitVersion: String {
+        return "605.1.15"
+    }
+    
+    // Safari UserAgent
+    var safariUserAgent: String {
+        if isIPad {
+            return "Mozilla/5.0 (iPad; CPU OS \(iosVersion) like Mac OS X) AppleWebKit/\(webKitVersion) (KHTML, like Gecko) Version/\(iosVersionDot) Mobile/15E148 Safari/604.1"
+        } else {
+            return "Mozilla/5.0 (iPhone; CPU iPhone OS \(iosVersion) like Mac OS X) AppleWebKit/\(webKitVersion) (KHTML, like Gecko) Version/\(iosVersionDot) Mobile/15E148 Safari/604.1"
+        }
+    }
+    
+    // LoneSword Browser UserAgent
+    var loneSwordUserAgent: String {
+        if isIPad {
+            return "Mozilla/5.0 (iPad; CPU OS \(iosVersion) like Mac OS X) AppleWebKit/\(webKitVersion) (KHTML, like Gecko) LoneSword/0.1 Mobile/15E148 Safari/604.1"
+        } else {
+            return "Mozilla/5.0 (iPhone; CPU iPhone OS \(iosVersion) like Mac OS X) AppleWebKit/\(webKitVersion) (KHTML, like Gecko) LoneSword/0.1 Mobile/15E148 Safari/604.1"
+        }
+    }
+    
+    // Chrome iOS UserAgent
+    var chromeIOSUserAgent: String {
+        if isIPad {
+            return "Mozilla/5.0 (iPad; CPU OS \(iosVersion) like Mac OS X) AppleWebKit/\(webKitVersion) (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1"
+        } else {
+            return "Mozilla/5.0 (iPhone; CPU iPhone OS \(iosVersion) like Mac OS X) AppleWebKit/\(webKitVersion) (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1"
+        }
+    }
+    
+    // Chrome PC UserAgent (Windows)
+    var chromePCUserAgent: String {
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 }
 
