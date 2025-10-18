@@ -25,6 +25,8 @@ final class AIAssistantViewModel: ObservableObject {
     
     // API Key management
     private let keychainKey = "com.lonesword.qwen.apikey"
+    @Published var hasValidPrivateKey: Bool = false
+    @Published var privateKeyStatus: String = "未配置私人API Key"
     
     func setModelContext(_ context: ModelContext) {
         self.modelContext = context
@@ -33,6 +35,13 @@ final class AIAssistantViewModel: ObservableObject {
     func loadAPIKeyFromKeychain() {
         if let apiKey = KeychainService.load(key: keychainKey), !apiKey.isEmpty {
             configureQwen(apiKey: apiKey)
+            // 异步验证API Key有效性
+            Task {
+                await validatePrivateKey(apiKey)
+            }
+        } else {
+            hasValidPrivateKey = false
+            privateKeyStatus = "未配置私人API Key"
         }
     }
     
@@ -40,6 +49,10 @@ final class AIAssistantViewModel: ObservableObject {
         let success = KeychainService.save(key: keychainKey, data: key)
         if success {
             configureQwen(apiKey: key)
+            // 异步验证API Key有效性
+            Task {
+                await validatePrivateKey(key)
+            }
         }
         return success
     }
@@ -53,6 +66,16 @@ final class AIAssistantViewModel: ObservableObject {
         }
     }
     
+    private func validatePrivateKey(_ key: String) async {
+        let isValid = await testAPIKey(key)
+        hasValidPrivateKey = isValid
+        if isValid {
+            privateKeyStatus = "私人API Key有效，无使用限制"
+        } else {
+            privateKeyStatus = "私人API Key无效，请检查Key是否正确或是否还有用量"
+        }
+    }
+    
     func configureQwen(apiKey: String, endpoint: String = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation") {
         qwenService = QwenService(config: .init(apiKey: apiKey, endpoint: endpoint))
     }
@@ -60,10 +83,12 @@ final class AIAssistantViewModel: ObservableObject {
     func autoAnalyzeIfEnabled() async {
         guard detectAIGenerated || autoTranslateChinese || autoSummarize else { return }
         
-        // Check usage limits
-        guard await checkAndIncrementUsage() else {
-            aiSummaryText = "已达到使用次数限制，请升级订阅套餐"
-            return
+        // Check usage limits (skip if using valid private key)
+        if !hasValidPrivateKey {
+            guard await checkAndIncrementUsage() else {
+                aiSummaryText = "已达到使用次数限制，请升级订阅套餐或配置私人API Key"
+                return
+            }
         }
         
         let content = await webContentProvider?() ?? ""
@@ -85,7 +110,7 @@ final class AIAssistantViewModel: ObservableObject {
                 }
             }
             
-            // Step 2: AI detection and summary
+            // Step 2: AI detection and summary, Reasioning and Acting.
             if (detectAIGenerated || autoSummarize), let qwen = qwenService {
                 let prompt = """
                 请分析以下内容：
@@ -120,15 +145,22 @@ final class AIAssistantViewModel: ObservableObject {
             }
             
         } catch {
-            aiSummaryText = "[AI 错误] \(error.localizedDescription)"
+            // 检查是否是API Key相关错误
+            if hasValidPrivateKey {
+                aiSummaryText = "[API 错误] 私人API Key可能已失效或用量不足，请检查Key状态"
+            } else {
+                aiSummaryText = "[AI 错误] \(error.localizedDescription)"
+            }
         }
     }
     
     func queryFromUser(_ userQuery: String) async {
-        // Check usage limits
-        guard await checkAndIncrementUsage() else {
-            conversationText += "\n\n已达到使用次数限制，请升级订阅套餐"
-            return
+        // Check usage limits (skip if using valid private key)
+        if !hasValidPrivateKey {
+            guard await checkAndIncrementUsage() else {
+                conversationText += "\n\n已达到使用次数限制，请升级订阅套餐或配置私人API Key"
+                return
+            }
         }
         
         let content = await webContentProvider?() ?? ""
@@ -145,7 +177,12 @@ final class AIAssistantViewModel: ObservableObject {
                 conversationText += "\n\n**AI:** 未配置API Key，请在设置中配置"
             }
         } catch {
-            conversationText += "\n\n**AI:** [错误] \(error.localizedDescription)"
+            // 检查是否是API Key相关错误
+            if hasValidPrivateKey {
+                conversationText += "\n\n**AI:** [API 错误] 私人API Key可能已失效或用量不足，请检查Key状态"
+            } else {
+                conversationText += "\n\n**AI:** [错误] \(error.localizedDescription)"
+            }
         }
         
         isLoading = false
@@ -227,5 +264,12 @@ final class AIAssistantViewModel: ObservableObject {
         } catch {
             print("Failed to update subscription tier: \(error)")
         }
+    }
+    
+    func resetForNewPage() {
+        print("DEBUG: AIAssistantViewModel resetForNewPage called")
+        aiSummaryText = "AI识别中…"
+        // 可选：清空对话记录
+        // conversationText = ""
     }
 }

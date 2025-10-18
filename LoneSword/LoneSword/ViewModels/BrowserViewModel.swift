@@ -80,6 +80,18 @@ class BrowserViewModel: NSObject, ObservableObject {
         guard let webView = webView else { return }
         
         let processedURL = processURL(url)
+        
+        // 检测URL是否真正变化
+        if processedURL != self.currentURL {
+            // 触发URL变化通知（在更新currentURL之前）
+            print("DEBUG: loadURL sending URL change notification")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("WebViewURLDidChange"),
+                object: nil,
+                userInfo: ["url": processedURL]
+            )
+        }
+        
         currentURL = processedURL
         
         // Stop any ongoing load before starting a new one to avoid conflicts
@@ -151,7 +163,18 @@ extension BrowserViewModel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         print("DEBUG: didCommit url=\(webView.url?.absoluteString ?? "nil")")
         DispatchQueue.main.async {
-            self.currentURL = webView.url?.absoluteString ?? self.currentURL
+            let newURL = webView.url?.absoluteString ?? self.currentURL
+            // 检测URL是否真正变化（包括锚点链接）
+            if newURL != self.currentURL {
+                self.currentURL = newURL
+                // 触发URL变化通知（作为后备，处理前进/后退/重定向等场景）
+                print("DEBUG: didCommit sending URL change notification")
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("WebViewURLDidChange"),
+                    object: nil,
+                    userInfo: ["url": newURL]
+                )
+            }
             self.pageTitle = webView.title ?? ""
         }
     }
@@ -185,6 +208,16 @@ extension BrowserViewModel: WKNavigationDelegate {
         // 对用户点击的链接进行地址栏与加载状态的即时更新，但不拦截加载
         if navigationAction.navigationType == .linkActivated,
            let url = navigationAction.request.url?.absoluteString {
+            // 检测URL是否真正变化
+            if url != self.currentURL {
+                // 触发URL变化通知（在更新currentURL之前）
+                print("DEBUG: decidePolicyFor sending URL change notification")
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("WebViewURLDidChange"),
+                    object: nil,
+                    userInfo: ["url": url]
+                )
+            }
             self.currentURL = url
             self.isLoading = true
             self.loadingProgress = 0

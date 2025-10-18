@@ -26,7 +26,7 @@ struct SettingsView: View {
                             .foregroundColor(textColor)
                         
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("私人Qwen API Key")
+                            Text("私人Qwen API Key，检测Key有效则默认使用，不配置则不使用")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(textColor)
                             

@@ -56,6 +56,25 @@ struct AIAssistantView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
             
+            // 私人API Key状态显示
+            if !vm.privateKeyStatus.isEmpty {
+                HStack {
+                    Image(systemName: vm.hasValidPrivateKey ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(vm.hasValidPrivateKey ? .green : .orange)
+                    
+                    Text(vm.privateKeyStatus)
+                        .font(.system(size: 12))
+                        .foregroundColor(secondaryColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            }
+            
             Divider()
                 .padding(.horizontal, 0)
             
@@ -157,6 +176,14 @@ struct AIAssistantView: View {
                     }
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("WebViewURLDidChange"))) { notification in
+            // URL变化时立即重置AI总结文本
+            print("DEBUG: AIAssistantView received URL change notification")
+            if let url = notification.userInfo?["url"] as? String {
+                print("DEBUG: New URL: \(url)")
+            }
+            vm.resetForNewPage()
         }
         .onReceive(browser.$loadingProgress) { progress in
             if progress >= 1.0 {
