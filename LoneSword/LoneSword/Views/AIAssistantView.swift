@@ -5,7 +5,7 @@ import SwiftData
 struct AIAssistantView: View {
     @EnvironmentObject var browser: BrowserViewModel
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var vm = AIAssistantViewModel()
+    @ObservedObject var vm: AIAssistantViewModel
     @StateObject private var speech = SpeechRecognitionService()
     @State private var userInput: String = ""
     @State private var showSettingsSheet: Bool = false
@@ -50,7 +50,7 @@ struct AIAssistantView: View {
             // 三个横向并排的"复选柜"样式
             HStack(spacing: 8) {
                 OptionChip(title: "识别AI生成", isOn: $vm.detectAIGenerated, accentBlue: accentBlue, textColor: textColor)
-                OptionChip(title: "自动翻译", isOn: $vm.autoTranslateChinese, accentBlue: accentBlue, textColor: textColor)
+                // OptionChip(title: "自动翻译", isOn: $vm.autoTranslateChinese, accentBlue: accentBlue, textColor: textColor)
                 OptionChip(title: "自动总结", isOn: $vm.autoSummarize, accentBlue: accentBlue, textColor: textColor)
             }
             .padding(.horizontal, 12)
@@ -161,21 +161,8 @@ struct AIAssistantView: View {
             if !newVal.isEmpty { userInput = newVal }
         }
         .task {
-            // Set model context for usage tracking
-            vm.setModelContext(modelContext)
-            
-            // Load API Key from Keychain
-            vm.loadAPIKeyFromKeychain()
-            
-            // Set web content provider
-            vm.webContentProvider = { [weak browser] in
-                await withCheckedContinuation { continuation in
-                    browser?.webView?.evaluateJavaScript("document.documentElement.innerText") { result, _ in
-                        if let text = result as? String { continuation.resume(returning: text) }
-                        else { continuation.resume(returning: "") }
-                    }
-                }
-            }
+            // 这些初始化现在在 ContentView 中完成，这里不需要重复设置
+            // 但保留这个 task 块以防需要其他初始化逻辑
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("WebViewURLDidChange"))) { notification in
             // URL变化时立即重置AI总结文本
@@ -274,5 +261,5 @@ private struct OptionChip: View {
 }
 
 #Preview {
-    AIAssistantView()
+    AIAssistantView(vm: AIAssistantViewModel())
 }

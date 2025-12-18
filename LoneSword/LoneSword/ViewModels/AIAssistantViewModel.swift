@@ -81,7 +81,8 @@ final class AIAssistantViewModel: ObservableObject {
     }
     
     func autoAnalyzeIfEnabled() async {
-        guard detectAIGenerated || autoTranslateChinese || autoSummarize else { return }
+        // 注意：翻译功能已禁用，不再作为触发条件
+        guard detectAIGenerated || autoSummarize else { return }
         
         // Check usage limits (skip if using valid private key)
         if !hasValidPrivateKey {
@@ -102,43 +103,65 @@ final class AIAssistantViewModel: ObservableObject {
         do {
             var processedContent = content
             
-            // Step 1: Translation if enabled
-            if autoTranslateChinese, let qwen = qwenService {
-                let translationResult = try await qwen.detectAndTranslate(webContent: content)
-                if translationResult.isTranslated {
-                    processedContent = translationResult.translatedContent
-                }
-            }
+            // Step 1: Translation if enabled (已禁用翻译功能，不再调用大模型)
+            // if autoTranslateChinese, let qwen = qwenService {
+            //     let translationResult = try await qwen.detectAndTranslate(webContent: content)
+            //     if translationResult.isTranslated {
+            //         processedContent = translationResult.translatedContent
+            //     }
+            // }
             
             // Step 2: AI detection and summary, Reasioning and Acting.
             if (detectAIGenerated || autoSummarize), let qwen = qwenService {
-                let prompt = """
-                请分析以下内容：
-                1) 判断是否为AI生成的内容（回答"是"或"否"）
-                2) 生成200字以内的结构化总结
+                // 根据开关状态构建不同的 prompt
+                var prompt = "请分析以下内容：\n"
+                var needsAIDetection = false
+                var needsSummary = false
                 
-                请按以下格式回复：
-                AI生成判断：[是/否]
-                内容总结：[总结内容]
-                """
+                if detectAIGenerated {
+                    prompt += "1) 判断是否为AI生成的内容（回答\"是\"或\"否\"）\n"
+                    needsAIDetection = true
+                }
+                
+                if autoSummarize {
+                    prompt += "\(needsAIDetection ? "2" : "1")) 生成200字以内的结构化总结\n"
+                    needsSummary = true
+                }
+                
+                prompt += "\n请按以下格式回复：\n"
+                if needsAIDetection {
+                    prompt += "AI生成判断：[是/否]\n"
+                }
+                if needsSummary {
+                    prompt += "内容总结：[总结内容]\n"
+                }
                 
                 let result = try await qwen.call(webContent: processedContent, userQuery: prompt)
                 
                 // Parse result
                 var summaryText = ""
-                if detectAIGenerated && result.contains("AI生成判断：是") {
-                    summaryText = "**本文可能为AI创作**\n\n"
+                
+                // 只有开启了"识别AI生成"功能时才显示识别结果
+                if detectAIGenerated {
+                    if result.contains("AI生成判断：是") {
+                        summaryText = "**本文可能为AI创作**\n\n"
+                    } else {
+                        summaryText = "**本文未识别到AI创作**\n\n"
+                    }
                 }
                 
-                // Extract summary
-                if let summaryRange = result.range(of: "内容总结：") {
-                    let summary = String(result[summaryRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                    summaryText += "内容总结：\(summary)"
-                } else {
-                    summaryText += result
+                // 只有开启了"自动总结"功能时才显示总结
+                if autoSummarize {
+                    if let summaryRange = result.range(of: "内容总结：") {
+                        let summary = String(result[summaryRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        summaryText += "内容总结：\(summary)"
+                    } else if !detectAIGenerated {
+                        // 如果只开启了总结功能且没有找到"内容总结："标记，显示全部结果
+                        summaryText = result
+                    }
                 }
                 
-                aiSummaryText = summaryText
+                aiSummaryText = summaryText.isEmpty ? "分析完成" : summaryText
             } else {
                 // No API configured
                 aiSummaryText = "未配置API Key，请在设置中配置"

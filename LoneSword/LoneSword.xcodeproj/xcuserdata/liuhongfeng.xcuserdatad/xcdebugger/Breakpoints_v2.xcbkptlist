@@ -18,50 +18,6 @@
             endingLineNumber = "51"
             landmarkName = "call(webContent:userQuery:)"
             landmarkType = "7">
-            <Locations>
-               <Location
-                  uuid = "EE377673-EB7C-4A7A-9711-895D42A17CA8 - 8032fe63e2fff365"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(1) suspend resume partial function for LoneSword.QwenService.call(webContent: Swift.String, userQuery: Swift.String) async throws -&gt; Swift.String"
-                  moduleName = "LoneSword.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Services/QwenService.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "52"
-                  endingLineNumber = "52">
-               </Location>
-               <Location
-                  uuid = "EE377673-EB7C-4A7A-9711-895D42A17CA8 - 17778594a3d5b278"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(2) await resume partial function for LoneSword.QwenService.call(webContent: Swift.String, userQuery: Swift.String) async throws -&gt; Swift.String"
-                  moduleName = "LoneSword.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Services/QwenService.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "52"
-                  endingLineNumber = "52">
-               </Location>
-               <Location
-                  uuid = "EE377673-EB7C-4A7A-9711-895D42A17CA8 - a77c57451125e998"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(4) suspend resume partial function for LoneSword.QwenService.call(webContent: Swift.String, userQuery: Swift.String) async throws -&gt; Swift.String"
-                  moduleName = "LoneSword.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Services/QwenService.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "52"
-                  endingLineNumber = "52">
-               </Location>
-            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>
