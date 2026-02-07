@@ -29,8 +29,6 @@ class BrowserViewModel: NSObject, ObservableObject {
     // SwiftData ModelContext reference
     private var modelContext: ModelContext?
     
-    // 待添加的历史记录（用于处理 modelContext 设置前的页面加载）
-    private var pendingHistoryRecord: (url: String, title: String)?
     
     override init() {
         super.init()
@@ -72,8 +70,6 @@ class BrowserViewModel: NSObject, ObservableObject {
         progressObserver = webView.observe(\.estimatedProgress) { [weak self] _, _ in
             DispatchQueue.main.async {
                 self?.loadingProgress = webView.estimatedProgress
-                self?.canGoBack = webView.canGoBack
-                self?.canGoForward = webView.canGoForward
             }
         }
     }
@@ -102,8 +98,10 @@ class BrowserViewModel: NSObject, ObservableObject {
         let processedURL = processURL(url)
         print("DEBUG: loadURL called with url=\(url), processedURL=\(processedURL)")
         
+        let willPostURLChange = processedURL != self.currentURL
+        
         // 检测URL是否真正变化
-        if processedURL != self.currentURL {
+        if willPostURLChange {
             // 触发URL变化通知（在更新currentURL之前）
             print("DEBUG: loadURL sending URL change notification")
             NotificationCenter.default.post(
@@ -187,13 +185,6 @@ class BrowserViewModel: NSObject, ObservableObject {
     /// 设置 ModelContext 引用
     func setModelContext(_ context: ModelContext) {
         self.modelContext = context
-        
-        // 如果有待添加的历史记录，现在添加它
-        if let pending = pendingHistoryRecord {
-            print("DEBUG: ModelContext set, adding pending history record: \(pending.url)")
-            pendingHistoryRecord = nil
-            addToHistory(url: pending.url, title: pending.title)
-        }
     }
     
     /// 从 SwiftData 加载最近100条历史记录
@@ -230,14 +221,11 @@ class BrowserViewModel: NSObject, ObservableObject {
             
             print("DEBUG: Loaded \(navigationHistory.count) history records, currentIndex=\(currentHistoryIndex)")
             
-            // 检查当前页面是否已经在历史记录中
-            // 如果不在且页面已经加载完成，添加它（处理初始页面在 modelContext 设置前加载完成的情况）
-            if !currentURL.isEmpty && !isLoading {
-                let isInHistory = navigationHistory.contains { $0.url == currentURL }
-                if !isInHistory {
-                    print("DEBUG: Current URL not in history, adding: \(currentURL)")
-                    addToHistory(url: currentURL, title: pageTitle)
-                }
+            // 如果历史为空，确保初始URL被加载
+            if navigationHistory.isEmpty && !currentURL.isEmpty {
+                print("DEBUG: History is empty, ensuring initial URL is loaded: \(currentURL)")
+                // 不需要再次调用 loadURL，因为 init() 中已经调用过了
+                // 只需要确保 WebView 已经在加载
             }
         } catch {
             print("ERROR: Failed to load history: \(error)")
@@ -246,12 +234,7 @@ class BrowserViewModel: NSObject, ObservableObject {
     
     /// 添加新的历史记录
     private func addToHistory(url: String, title: String) {
-        guard let context = modelContext else {
-            // 如果 modelContext 还未设置，保存待添加的记录
-            pendingHistoryRecord = (url: url, title: title)
-            print("DEBUG: ModelContext not set yet, pending history record: \(url)")
-            return
-        }
+        guard let context = modelContext else { return }
         
         // 如果当前不在最新位置，删除当前位置之后的所有记录
         if currentHistoryIndex < navigationHistory.count - 1 {
@@ -281,13 +264,6 @@ class BrowserViewModel: NSObject, ObservableObject {
         // 限制历史记录数量为100条
         trimHistoryIfNeeded()
         
-        // 持久化更改到数据库
-        do {
-            try context.save()
-        } catch {
-            print("ERROR: Failed to save history: \(error)")
-        }
-        
         // 更新导航按钮状态
         updateNavigationButtonStates()
         
@@ -308,14 +284,6 @@ class BrowserViewModel: NSObject, ObservableObject {
             
             navigationHistory.removeFirst(removeCount)
             currentHistoryIndex -= removeCount
-            
-            // 持久化删除操作到数据库
-            do {
-                try context.save()
-            } catch {
-                print("ERROR: Failed to save trimmed history: \(error)")
-            }
-            
             print("DEBUG: Trimmed history to 100 records")
         }
     }
@@ -443,3 +411,4 @@ extension BrowserViewModel: WKUIDelegate {
         return nil
     }
 }
+
