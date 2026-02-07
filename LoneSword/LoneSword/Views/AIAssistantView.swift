@@ -174,7 +174,13 @@ struct AIAssistantView: View {
         }
         .onReceive(browser.$loadingProgress) { progress in
             if progress >= 1.0 {
+                guard vm.aiInsightEnabled else { return }
                 Task { await vm.autoAnalyzeIfEnabled() }
+            }
+        }
+        .onChange(of: vm.aiInsightEnabled) { _, enabled in
+            if !enabled, speech.isListening {
+                speech.stop()
             }
         }
         .sheet(isPresented: $showSettingsSheet) {
@@ -183,6 +189,7 @@ struct AIAssistantView: View {
     }
     
     private func submitQuery() {
+        guard vm.aiInsightEnabled else { return }
         let query = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
         Task { await vm.queryFromUser(query) }
@@ -190,6 +197,7 @@ struct AIAssistantView: View {
     }
     
     private func toggleSpeech() {
+        guard vm.aiInsightEnabled else { return }
         Task {
             if speech.isListening { speech.stop(); return }
             let ok = await speech.requestAuthorization()

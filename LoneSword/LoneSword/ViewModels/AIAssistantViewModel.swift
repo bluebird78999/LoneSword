@@ -7,6 +7,7 @@ final class AIAssistantViewModel: ObservableObject {
     @Published var detectAIGenerated: Bool = true
     @Published var autoTranslateChinese: Bool = true
     @Published var autoSummarize: Bool = true
+    @Published var aiInsightEnabled: Bool = true
     @Published var isLoading: Bool = false
     @Published var aiSummaryText: String = "AI识别中…"
     @Published var conversationText: String = ""
@@ -30,6 +31,22 @@ final class AIAssistantViewModel: ObservableObject {
     
     func setModelContext(_ context: ModelContext) {
         self.modelContext = context
+    }
+
+    func loadSettings() {
+        guard let settings = fetchOrCreateSettings() else { return }
+        aiInsightEnabled = settings.isAIEnabled
+    }
+
+    func setAIInsightEnabled(_ enabled: Bool) {
+        aiInsightEnabled = enabled
+        guard let settings = fetchOrCreateSettings() else { return }
+        settings.isAIEnabled = enabled
+        do {
+            try modelContext?.save()
+        } catch {
+            print("Failed to save AI enabled setting: \(error)")
+        }
     }
     
     func loadAPIKeyFromKeychain() {
@@ -81,6 +98,7 @@ final class AIAssistantViewModel: ObservableObject {
     }
     
     func autoAnalyzeIfEnabled() async {
+        guard aiInsightEnabled else { return }
         // 注意：翻译功能已禁用，不再作为触发条件
         guard detectAIGenerated || autoSummarize else { return }
         
@@ -101,7 +119,7 @@ final class AIAssistantViewModel: ObservableObject {
         aiSummaryText = "AI识别中…"
         
         do {
-            var processedContent = content
+            let processedContent = content
             
             // Step 1: Translation if enabled (已禁用翻译功能，不再调用大模型)
             // if autoTranslateChinese, let qwen = qwenService {
@@ -178,6 +196,7 @@ final class AIAssistantViewModel: ObservableObject {
     }
     
     func queryFromUser(_ userQuery: String) async {
+        guard aiInsightEnabled else { return }
         // Check usage limits (skip if using valid private key)
         if !hasValidPrivateKey {
             guard await checkAndIncrementUsage() else {
@@ -214,24 +233,7 @@ final class AIAssistantViewModel: ObservableObject {
     // MARK: - Usage Tracking
     
     private func checkAndIncrementUsage() async -> Bool {
-        guard let context = modelContext else { return true }
-        
-        // Fetch or create AISettings
-        let descriptor = FetchDescriptor<AISettings>()
-        let settings: AISettings
-        
-        do {
-            let allSettings = try context.fetch(descriptor)
-            if let existing = allSettings.first {
-                settings = existing
-            } else {
-                settings = AISettings()
-                context.insert(settings)
-            }
-        } catch {
-            print("Failed to fetch AISettings: \(error)")
-            return true // Allow usage if can't check
-        }
+        guard let settings = fetchOrCreateSettings() else { return true }
         
         // Reset daily counter if needed
         let calendar = Calendar.current
@@ -244,7 +246,7 @@ final class AIAssistantViewModel: ObservableObject {
         let limit = getUsageLimitForTier(settings.subscriptionTier)
         
         // Check if within limit
-        if settings.dailyUsageCount >= limit {
+        if settings.dailyUsageCount >= limit { 
             return false
         }
         
@@ -253,7 +255,7 @@ final class AIAssistantViewModel: ObservableObject {
         settings.totalUsageCount += 1
         
         do {
-            try context.save()
+            try modelContext?.save()
         } catch {
             print("Failed to save usage: \(error)")
         }
@@ -275,15 +277,10 @@ final class AIAssistantViewModel: ObservableObject {
     }
     
     func updateSubscriptionTier(_ tier: String) async {
-        guard let context = modelContext else { return }
-        
-        let descriptor = FetchDescriptor<AISettings>()
+        guard let settings = fetchOrCreateSettings() else { return }
+        settings.subscriptionTier = tier
         do {
-            let allSettings = try context.fetch(descriptor)
-            if let settings = allSettings.first {
-                settings.subscriptionTier = tier
-                try context.save()
-            }
+            try modelContext?.save()
         } catch {
             print("Failed to update subscription tier: \(error)")
         }
@@ -294,5 +291,23 @@ final class AIAssistantViewModel: ObservableObject {
         aiSummaryText = "AI识别中…"
         // 可选：清空对话记录
         // conversationText = ""
+    }
+
+    private func fetchOrCreateSettings() -> AISettings? {
+        guard let context = modelContext else { return nil }
+        let descriptor = FetchDescriptor<AISettings>()
+        do {
+            let allSettings = try context.fetch(descriptor)
+            if let existing = allSettings.first {
+                return existing
+            }
+            let settings = AISettings()
+            context.insert(settings)
+            try context.save()
+            return settings
+        } catch {
+            print("Failed to fetch AISettings: \(error)")
+            return nil
+        }
     }
 }

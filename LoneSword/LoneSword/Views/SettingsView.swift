@@ -19,6 +19,31 @@ struct SettingsView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
+                    // AI Insight Toggle
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("AI洞察")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(textColor)
+                        
+                        Toggle(isOn: Binding(
+                            get: { vm.aiInsightEnabled },
+                            set: { vm.setAIInsightEnabled($0) }
+                        )) {
+                            Text(vm.aiInsightEnabled ? "AI洞察已开启" : "AI洞察已关闭")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(textColor)
+                        }
+                        .tint(accentBlue)
+                        
+                        Text("关闭后AI洞察区域收起，仅保留工具栏设置入口")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(16)
+                    .background(Color.white)
+                    .cornerRadius(12)
+                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    
                     // API Key Section
                     VStack(alignment: .leading, spacing: 12) {
                         Text("API 配置")

@@ -2,10 +2,12 @@ import SwiftUI
 
 struct BrowserToolbarView: View {
     @ObservedObject var viewModel: BrowserViewModel
+    @ObservedObject var aiViewModel: AIAssistantViewModel
     @State private var urlInput: String = ""
     @State private var isEditing: Bool = false
     @State private var lastTapTime: Date = .distantPast
     @FocusState private var isUrlFieldFocused: Bool
+    @State private var showSettingsSheet: Bool = false
     
     let backgroundColor = Color(red: 0.98, green: 0.98, blue: 0.98)
     let accentBlue = Color(red: 0, green: 0.478, blue: 1)
@@ -90,6 +92,15 @@ struct BrowserToolbarView: View {
                         .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
+                
+                if !aiViewModel.aiInsightEnabled {
+                    Button(action: { showSettingsSheet = true }) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(accentBlue)
+                    }
+                    .frame(width: 44, height: 44)
+                }
             }
             .padding(12)
             .background(backgroundColor)
@@ -102,6 +113,9 @@ struct BrowserToolbarView: View {
                 if !isEditing {
                     self.urlInput = newValue
                 }
+            }
+            .sheet(isPresented: $showSettingsSheet) {
+                SettingsView(vm: aiViewModel)
             }
         }
     }
@@ -138,5 +152,5 @@ struct BrowserToolbarView: View {
 }
 
 #Preview {
-    BrowserToolbarView(viewModel: BrowserViewModel())
+    BrowserToolbarView(viewModel: BrowserViewModel(), aiViewModel: AIAssistantViewModel())
 }

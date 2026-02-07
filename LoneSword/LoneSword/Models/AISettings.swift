@@ -6,6 +6,7 @@ final class AISettings {
     var detectAIGenerated: Bool = true
     var autoTranslateChinese: Bool = true
     var autoSummarize: Bool = true
+    var isAIEnabled: Bool = true
     
     // Subscription tracking
     var subscriptionTier: String = "free" // "free", "basic", "premium"

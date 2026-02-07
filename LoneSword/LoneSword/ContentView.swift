@@ -39,39 +39,61 @@ struct ContentView: View {
                 
                 if geometry.size.width > geometry.size.height {
                     // 横屏布局：左侧 2/3 网页 + 右侧 1/3 AI
-                    HStack(spacing: 0) {
+                    if aiAssistantViewModel.aiInsightEnabled {
+                        HStack(spacing: 0) {
+                            VStack(spacing: 0) {
+                                BrowserToolbarView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
+                                
+                                WebViewContainer(viewModel: browserViewModel)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .id("webview-landscape-\(layoutReady)")
+                            }
+                            .frame(width: geometry.size.width * 2 / 3, height: geometry.size.height)
+                            
+                            VStack(spacing: 0) {
+                                AIAssistantView(vm: aiAssistantViewModel)
+                                    .environmentObject(browserViewModel)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                            .frame(width: geometry.size.width * 1 / 3, height: geometry.size.height)
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    } else {
                         VStack(spacing: 0) {
-                            BrowserToolbarView(viewModel: browserViewModel)
+                            BrowserToolbarView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
                             
                             WebViewContainer(viewModel: browserViewModel)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .id("webview-landscape-\(layoutReady)")
                         }
-                        .frame(width: geometry.size.width * 2 / 3, height: geometry.size.height)
-                        
-                        VStack(spacing: 0) {
-                            AIAssistantView(vm: aiAssistantViewModel)
-                                .environmentObject(browserViewModel)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                        .frame(width: geometry.size.width * 1 / 3, height: geometry.size.height)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
                     }
-                    .frame(width: geometry.size.width, height: geometry.size.height)
                 } else {
                     // 竖屏布局：上部 2/3 网页 + 下部 1/3 AI
-                    VStack(spacing: 0) {
+                    if aiAssistantViewModel.aiInsightEnabled {
                         VStack(spacing: 0) {
-                            BrowserToolbarView(viewModel: browserViewModel)
+                            VStack(spacing: 0) {
+                                BrowserToolbarView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
+                                
+                                WebViewContainer(viewModel: browserViewModel)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .id("webview-portrait-\(layoutReady)")
+                            }
+                            .frame(height: geometry.size.height * 2 / 3)
+                            
+                            AIAssistantView(vm: aiAssistantViewModel)
+                                .environmentObject(browserViewModel)
+                                .frame(height: geometry.size.height * 1 / 3)
+                        }
+                    } else {
+                        VStack(spacing: 0) {
+                            BrowserToolbarView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
                             
                             WebViewContainer(viewModel: browserViewModel)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .id("webview-portrait-\(layoutReady)")
                         }
-                        .frame(height: geometry.size.height * 2 / 3)
-                        
-                        AIAssistantView(vm: aiAssistantViewModel)
-                            .environmentObject(browserViewModel)
-                            .frame(height: geometry.size.height * 1 / 3)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
                     }
                 }
             }
@@ -85,6 +107,7 @@ struct ContentView: View {
             // 设置 AI Assistant 的 ModelContext
             aiAssistantViewModel.setModelContext(modelContext)
             aiAssistantViewModel.loadAPIKeyFromKeychain()
+            aiAssistantViewModel.loadSettings()
             
             // 设置 web content provider
             aiAssistantViewModel.webContentProvider = { [weak browserViewModel] in
