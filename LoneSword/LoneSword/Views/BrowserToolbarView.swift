@@ -126,7 +126,7 @@ struct BrowserToolbarView: View {
         if now.timeIntervalSince(lastTapTime) < 0.3 {
             // 双击：加载首页
             print("DEBUG: Double tap detected")
-            let homeURL = "https://ai.quark.cn/"
+            let homeURL = "https://www.google.com/ncr"
             loadURL(homeURL)
         } else {
             // 单击
