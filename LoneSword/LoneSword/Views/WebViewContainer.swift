@@ -1,52 +1,47 @@
 import SwiftUI
 import WebKit
+import os
 
 struct WebViewContainer: UIViewRepresentable {
     @ObservedObject var viewModel: BrowserViewModel
     
+    private static let logger = Logger(subsystem: "com.lonesword.browser", category: "UI")
+    
     func makeUIView(context: Context) -> WKWebView {
         let webView = viewModel.ensureWebView()
         
-        // 确保 WebView 有正确的初始布局
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.setNeedsLayout()
         webView.layoutIfNeeded()
         
-        attachRefreshControl(to: webView)
+        attachRefreshControl(to: webView, coordinator: context.coordinator)
         
-        // 若还未加载任何页面，立即加载一次
         if webView.url == nil, let url = URL(string: viewModel.currentURL) {
             webView.load(URLRequest(url: url))
         }
         
-        print("DEBUG: makeUIView called, webView.frame=\(webView.frame)")
+        Self.logger.debug("makeUIView: frame.size=\(webView.frame.size.width)x\(webView.frame.size.height)")
         return webView
     }
     
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        // 强制刷新布局
         uiView.setNeedsLayout()
         
-        print("DEBUG: updateUIView called, uiView.frame=\(uiView.frame)")
+        Self.logger.debug("updateUIView: frame.size=\(uiView.frame.size.width)x\(uiView.frame.size.height)")
         
-        // 不在 updateUIView 主动触发加载，避免覆盖 ViewModel 正在发起的导航
-        // 仅在 WebView 还未加载任何页面时，执行一次性的纠偏加载
+        // Only load if nothing has been loaded yet - avoid overriding in-progress navigation
         if uiView.url == nil, let url = URL(string: viewModel.currentURL) {
             uiView.load(URLRequest(url: url))
         }
     }
     
-    private func attachRefreshControl(to webView: WKWebView) {
+    private func attachRefreshControl(to webView: WKWebView, coordinator: Coordinator) {
         let refreshControl = UIRefreshControl()
-        refreshControl.addTarget(contextCoordinator(), action: #selector(Coordinator.handleRefresh(_:)), for: .valueChanged)
+        refreshControl.addTarget(coordinator, action: #selector(Coordinator.handleRefresh(_:)), for: .valueChanged)
         webView.scrollView.refreshControl = refreshControl
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(viewModel: viewModel)
-    }
-    
-    private func contextCoordinator() -> Coordinator {
         Coordinator(viewModel: viewModel)
     }
     

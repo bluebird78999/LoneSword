@@ -1,6 +1,8 @@
 import SwiftUI
+import os
 
 struct BrowserToolbarView: View {
+    private static let logger = Logger(subsystem: "com.lonesword.browser", category: "UI")
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var aiViewModel: AIAssistantViewModel
     @State private var urlInput: String = ""
@@ -21,7 +23,7 @@ struct BrowserToolbarView: View {
                     .frame(height: 2)
                 
                 accentBlue
-                    .frame(width: max(0, UIScreen.main.bounds.width * viewModel.loadingProgress), height: 2)
+                    .frame(width: max(0, 428 * viewModel.loadingProgress), height: 2)
                     .animation(.easeInOut(duration: 0.2), value: viewModel.loadingProgress)
             }
             
@@ -121,16 +123,16 @@ struct BrowserToolbarView: View {
     }
     
     private func handleSlashTap(withInput input: String) {
-        print("DEBUG: handleSlashTap called, input=\(input)")
+        Self.logger.debug("Slash tap: \(input)")
         let now = Date()
         if now.timeIntervalSince(lastTapTime) < 0.3 {
             // 双击：加载首页
-            print("DEBUG: Double tap detected")
+            Self.logger.debug("Slash double tap")
             let homeURL = "https://www.google.com/ncr"
             loadURL(homeURL)
         } else {
             // 单击
-            print("DEBUG: Single tap detected")
+            Self.logger.debug("Slash single tap")
             loadURL(input)
         }
         lastTapTime = now
@@ -139,7 +141,7 @@ struct BrowserToolbarView: View {
     private func loadURL(_ input: String) {
         let target = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalURL = target.isEmpty ? viewModel.currentURL : target
-        print("DEBUG: Loading URL: \(finalURL)")
+        Self.logger.debug("Loading URL: \(finalURL)")
         
         // 只有在实际需要加载新 URL 时才停止当前加载
         if finalURL != viewModel.currentURL {

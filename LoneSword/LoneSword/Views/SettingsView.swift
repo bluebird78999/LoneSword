@@ -1,10 +1,13 @@
 import SwiftUI
 import StoreKit
+import os
 
 struct SettingsView: View {
     @ObservedObject var vm: AIAssistantViewModel
     @StateObject private var storeManager = StoreKitManager()
     @Environment(\.dismiss) private var dismiss
+    
+    private static let logger = Logger(subsystem: "com.lonesword.browser", category: "StoreKit")
     
     @State private var apiKeyInput: String = ""
     @State private var isTestingKey: Bool = false
@@ -261,13 +264,15 @@ struct SettingsView: View {
     
     private func purchaseProduct(_ product: Product) async {
         do {
-            if let transaction = try await storeManager.purchase(product) {
-                // Update subscription tier in ViewModel
-                let tier = product.id.contains("premium") ? "premium" : "basic"
+            if try await storeManager.purchase(product) != nil {
+                // Auto-sync subscription tier to AISettings (fixes state sync gap)
+                let tier = storeManager.getCurrentTier()
                 await vm.updateSubscriptionTier(tier)
+                Self.logger.info("Purchase completed, tier synced: \(tier)")
                 testResult = "✓ 购买成功"
             }
         } catch {
+            Self.logger.error("Purchase failed: \(error.localizedDescription)")
             testResult = "✗ 购买失败: \(error.localizedDescription)"
         }
     }
@@ -275,8 +280,13 @@ struct SettingsView: View {
     private func restorePurchases() async {
         do {
             try await storeManager.restore()
+            // Auto-sync restored subscription tier
+            let tier = storeManager.getCurrentTier()
+            await vm.updateSubscriptionTier(tier)
+            Self.logger.info("Purchases restored, tier synced: \(tier)")
             testResult = "✓ 恢复成功"
         } catch {
+            Self.logger.error("Restore failed: \(error.localizedDescription)")
             testResult = "✗ 恢复失败: \(error.localizedDescription)"
         }
     }

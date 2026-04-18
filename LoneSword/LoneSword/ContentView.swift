@@ -1,13 +1,7 @@
-//
-//  ContentView.swift
-//  LoneSword
-//
-//  Created by LiuHongfeng on 2025/10/18.
-//
-
 import SwiftUI
 import SwiftData
 import WebKit
+import os
 
 struct ContentView: View {
     @Environment(\.verticalSizeClass) var verticalSizeClass
@@ -15,10 +9,11 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var browserViewModel = BrowserViewModel()
     @StateObject private var aiAssistantViewModel = AIAssistantViewModel()
-    @State private var layoutReady = false
+    @StateObject private var speechService = SpeechRecognitionService()
+    
+    private static let logger = Logger(subsystem: "com.lonesword.browser", category: "UI")
     
     var isLandscape: Bool {
-        // 更可靠的检测方法：竖屏是 vertical，横屏是 regular
         verticalSizeClass == .compact
     }
     
@@ -28,88 +23,24 @@ struct ContentView: View {
                 .ignoresSafeArea()
             
             GeometryReader { geometry in
-                let _ = print("DEBUG: ContentView GeometryReader size=\(geometry.size)")
                 Color.clear
-                    .onAppear {
-                        if !layoutReady {
-                            layoutReady = true
-                            print("DEBUG: Layout is now ready")
-                        }
-                    }
                 
                 if geometry.size.width > geometry.size.height {
-                    // 横屏布局：左侧 2/3 网页 + 右侧 1/3 AI
-                    if aiAssistantViewModel.aiInsightEnabled {
-                        HStack(spacing: 0) {
-                            VStack(spacing: 0) {
-                                BrowserToolbarView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
-                                
-                                WebViewContainer(viewModel: browserViewModel)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .id("webview-landscape-\(layoutReady)")
-                            }
-                            .frame(width: geometry.size.width * 2 / 3, height: geometry.size.height)
-                            
-                            VStack(spacing: 0) {
-                                AIAssistantView(vm: aiAssistantViewModel)
-                                    .environmentObject(browserViewModel)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
-                            .frame(width: geometry.size.width * 1 / 3, height: geometry.size.height)
-                        }
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                    } else {
-                        VStack(spacing: 0) {
-                            BrowserToolbarView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
-                            
-                            WebViewContainer(viewModel: browserViewModel)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .id("webview-landscape-\(layoutReady)")
-                        }
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                    }
+                    landscapeLayout(in: geometry.size)
                 } else {
-                    // 竖屏布局：上部 2/3 网页 + 下部 1/3 AI
-                    if aiAssistantViewModel.aiInsightEnabled {
-                        VStack(spacing: 0) {
-                            VStack(spacing: 0) {
-                                BrowserToolbarView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
-                                
-                                WebViewContainer(viewModel: browserViewModel)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .id("webview-portrait-\(layoutReady)")
-                            }
-                            .frame(height: geometry.size.height * 2 / 3)
-                            
-                            AIAssistantView(vm: aiAssistantViewModel)
-                                .environmentObject(browserViewModel)
-                                .frame(height: geometry.size.height * 1 / 3)
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            BrowserToolbarView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
-                            
-                            WebViewContainer(viewModel: browserViewModel)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .id("webview-portrait-\(layoutReady)")
-                        }
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                    }
+                    portraitLayout(in: geometry.size)
                 }
             }
         }
         .onAppear {
-            print("DEBUG: ContentView onAppear called")
-            // 设置 ModelContext 并加载历史记录
+            Self.logger.debug("ContentView onAppear")
             browserViewModel.setModelContext(modelContext)
             browserViewModel.loadHistoryFromStorage()
             
-            // 设置 AI Assistant 的 ModelContext
             aiAssistantViewModel.setModelContext(modelContext)
             aiAssistantViewModel.loadAPIKeyFromKeychain()
             aiAssistantViewModel.loadSettings()
             
-            // 设置 web content provider
             aiAssistantViewModel.webContentProvider = { [weak browserViewModel] in
                 await withCheckedContinuation { continuation in
                     browserViewModel?.webView?.evaluateJavaScript("document.documentElement.innerText") { result, _ in
@@ -118,17 +49,65 @@ struct ContentView: View {
                     }
                 }
             }
-            
-            // 强制触发布局刷新
-            DispatchQueue.main.async {
-                // 这会触发 SwiftUI 重新计算布局
-                print("DEBUG: Forcing layout refresh")
+        }
+    }
+    
+    // MARK: - Layout helpers
+    
+    @ViewBuilder
+    private func landscapeLayout(in size: CGSize) -> some View {
+        if aiAssistantViewModel.aiInsightEnabled {
+            HStack(spacing: 0) {
+                BrowserPageView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
+                    .frame(width: size.width * 2 / 3, height: size.height)
+                
+                AIAssistantView(vm: aiAssistantViewModel, speech: speechService)
+                    .environmentObject(browserViewModel)
+                    .frame(width: size.width * 1 / 3, height: size.height)
             }
+            .frame(width: size.width, height: size.height)
+        } else {
+            BrowserPageView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
+                .frame(width: size.width, height: size.height)
+        }
+    }
+    
+    @ViewBuilder
+    private func portraitLayout(in size: CGSize) -> some View {
+        if aiAssistantViewModel.aiInsightEnabled {
+            VStack(spacing: 0) {
+                BrowserPageView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
+                    .frame(height: size.height * 2 / 3)
+                
+                AIAssistantView(vm: aiAssistantViewModel, speech: speechService)
+                    .environmentObject(browserViewModel)
+                    .frame(height: size.height * 1 / 3)
+            }
+        } else {
+            BrowserPageView(viewModel: browserViewModel, aiViewModel: aiAssistantViewModel)
+                .frame(width: size.width, height: size.height)
+        }
+    }
+}
+
+// MARK: - Reusable browser page (toolbar + webview)
+
+/// Combines the browser toolbar and web view container into a single reusable component.
+/// Eliminates layout duplication between landscape and portrait modes.
+struct BrowserPageView: View {
+    @ObservedObject var viewModel: BrowserViewModel
+    @ObservedObject var aiViewModel: AIAssistantViewModel
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            BrowserToolbarView(viewModel: viewModel, aiViewModel: aiViewModel)
+            WebViewContainer(viewModel: viewModel)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: BrowserHistory.self, inMemory: true)
 }

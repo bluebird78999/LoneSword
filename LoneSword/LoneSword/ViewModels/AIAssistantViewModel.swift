@@ -1,9 +1,11 @@
 import Foundation
 import Combine
 import SwiftData
+import os
 
 @MainActor
 final class AIAssistantViewModel: ObservableObject {
+    private static let logger = Logger(subsystem: "com.lonesword.browser", category: "AI")
     @Published var detectAIGenerated: Bool = true
     @Published var autoTranslateChinese: Bool = true
     @Published var autoSummarize: Bool = true
@@ -45,7 +47,7 @@ final class AIAssistantViewModel: ObservableObject {
         do {
             try modelContext?.save()
         } catch {
-            print("Failed to save AI enabled setting: \(error)")
+            Self.logger.error("Failed to save AI enabled setting: \(error.localizedDescription)")
         }
     }
     
@@ -246,7 +248,7 @@ final class AIAssistantViewModel: ObservableObject {
         let limit = getUsageLimitForTier(settings.subscriptionTier)
         
         // Check if within limit
-        if settings.dailyUsageCount >= limit { 
+        if settings.dailyUsageCount >= limit { 
             return false
         }
         
@@ -257,7 +259,7 @@ final class AIAssistantViewModel: ObservableObject {
         do {
             try modelContext?.save()
         } catch {
-            print("Failed to save usage: \(error)")
+            Self.logger.error("Failed to save usage: \(error.localizedDescription)")
         }
         
         return true
@@ -282,12 +284,12 @@ final class AIAssistantViewModel: ObservableObject {
         do {
             try modelContext?.save()
         } catch {
-            print("Failed to update subscription tier: \(error)")
+            Self.logger.error("Failed to update subscription tier: \(error.localizedDescription)")
         }
     }
     
     func resetForNewPage() {
-        print("DEBUG: AIAssistantViewModel resetForNewPage called")
+        Self.logger.debug("resetForNewPage called")
         aiSummaryText = "AI识别中…"
         // 可选：清空对话记录
         // conversationText = ""
@@ -306,7 +308,7 @@ final class AIAssistantViewModel: ObservableObject {
             try context.save()
             return settings
         } catch {
-            print("Failed to fetch AISettings: \(error)")
+            Self.logger.error("Failed to fetch AISettings: \(error.localizedDescription)")
             return nil
         }
     }

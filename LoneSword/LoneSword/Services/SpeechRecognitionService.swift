@@ -2,8 +2,10 @@ import Foundation
 import Combine
 import Speech
 import AVFoundation
+import os
 
 final class SpeechRecognitionService: NSObject, ObservableObject {
+    private static let logger = Logger(subsystem: "com.lonesword.browser", category: "Speech")
     @Published var recognizedText: String = ""
     @Published var isListening: Bool = false
     @Published var errorMessage: String?
@@ -55,7 +57,7 @@ final class SpeechRecognitionService: NSObject, ObservableObject {
             
             DispatchQueue.main.async { self.isListening = true }
         } catch {
-            DispatchQueue.main.async { self.errorMessage = error.localizedDescription }
+            Self.logger.error("Speech recognition error: \(error.localizedDescription)"); DispatchQueue.main.async { self.errorMessage = error.localizedDescription }
         }
     }
     

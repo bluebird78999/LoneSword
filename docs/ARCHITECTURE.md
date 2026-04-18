@@ -484,15 +484,27 @@ LoneSword/
 
 ---
 
-## 9. 已知技术债务
+## 9. 已知技术债务 (已修复 2026-04-18)
 
-1. **Coordinator 每次创建新实例**: `WebViewContainer.contextCoordinator()` 每次都创建新的 Coordinator，应改为单例或在 `makeCoordinator()` 中复用
-2. **Debug 日志泛滥**: 代码中有大量 `print("DEBUG: ...")` 语句，生产环境应移除或使用日志框架
-3. **ContentView 布局代码冗长**: 横竖屏逻辑重复度高，可抽取为 LayoutModifier
-4. **AISettings 与 StoreKitManager 状态未同步**: 购买成功后需手动调用 `updateSubscriptionTier`
-5. **Simple Markdown 解析器**: 仅支持粗体，不支持列表、代码块、链接等，可引入 AttributedString.MarkdownParsing (iOS 15+)
-6. **语音识别单次使用**: SpeechRecognitionService 在 AIAssistantView 中每次创建，未复用
-7. **Item 模型残留**: 项目模板生成的 Item.swift 未被使用但仍在 Schema 中
+以下 7 项技术债务已全部修复并通过验证:
+
+| # | 问题 | 修复方案 | 修改文件 |
+|---|------|---------|---------|
+| 1 | Coordinator 每次创建新实例 | 移除 `contextCoordinator()`，使用 SwiftUI 管理的 `makeCoordinator()` + `context.coordinator` | WebViewContainer.swift |
+| 2 | Debug 日志泛滥 | 全部替换为 `os.Logger` 结构化日志（按模块分: Browser/AI/UI/Network/Speech/StoreKit） | 全部 9 个 Swift 文件 |
+| 3 | ContentView 布局代码冗长 | 抽取 `BrowserPageView` 复用组件，横竖屏各调用一次；抽取 `landscapeLayout/portraitLayout` 方法 | ContentView.swift |
+| 4 | AISettings 与 StoreKit 状态未同步 | 购买/恢复成功后自动调用 `vm.updateSubscriptionTier(storeManager.getCurrentTier())` | SettingsView.swift |
+| 5 | 简易 Markdown 解析器 | 替换为 `AttributedString(markdown:options:)` 原生解析（iOS 15+），支持粗体、斜体、链接等 | AIAssistantView.swift |
+| 6 | SpeechRecognitionService 未复用 | 在 ContentView 中以 `@StateObject` 创建，作为参数传递给 AIAssistantView | ContentView.swift, AIAssistantView.swift |
+| 7 | Item 模型残留 | 从 Schema 中移除 `Item.self`，删除 Item.swift 文件，更新 Preview 引用 | LoneSwordApp.swift, ContentView.swift |
+
+## 10. 剩余待改进项
+
+1. **对话历史持久化**: `conversationText` 仅存储在内存中，App 重启后丢失
+2. **浏览历史列表 UI**: `BrowserHistory` 模型存在但无列表展示界面
+3. **Stream 流式 AI 响应**: 当前为一次性返回，可改为 SSE/Stream 提升体验
+4. **深色模式**: 当前仅浅色主题
+5. **标签页管理**: 当前仅支持单标签页
 
 ---
 

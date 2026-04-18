@@ -1,12 +1,15 @@
 import SwiftUI
 import WebKit
 import SwiftData
+import os
 
 struct AIAssistantView: View {
     @EnvironmentObject var browser: BrowserViewModel
     @Environment(\.modelContext) private var modelContext
     @ObservedObject var vm: AIAssistantViewModel
-    @StateObject private var speech = SpeechRecognitionService()
+    @ObservedObject var speech: SpeechRecognitionService
+    
+    private static let logger = Logger(subsystem: "com.lonesword.browser", category: "AI")
     @State private var userInput: String = ""
     @State private var showSettingsSheet: Bool = false
     
@@ -166,9 +169,9 @@ struct AIAssistantView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("WebViewURLDidChange"))) { notification in
             // URL变化时立即重置AI总结文本
-            print("DEBUG: AIAssistantView received URL change notification")
+            Self.logger.debug("Received URL change notification")
             if let url = notification.userInfo?["url"] as? String {
-                print("DEBUG: New URL: \(url)")
+                Self.logger.debug("New URL: \(url)")
             }
             vm.resetForNewPage()
         }
@@ -205,30 +208,33 @@ struct AIAssistantView: View {
         }
     }
     
-    // Simple markdown parser for bold text
+        // Use native AttributedString markdown parsing (iOS 15+)
     private func parseMarkdown(_ text: String) -> AttributedString {
-        var attributedString = AttributedString(text)
+        // Split by double newlines into paragraphs for better rendering
+        let paragraphs = text.components(separatedBy: "\n\n")
+        var result = AttributedString()
         
-        // Parse **bold** text
-        let pattern = "\\*\\*(.+?)\\*\\*"
-        if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-            let nsString = text as NSString
-            let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+        for (index, paragraph) in paragraphs.enumerated() {
+            let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
             
-            for match in matches.reversed() {
-                if let range = Range(match.range, in: text) {
-                    let boldText = String(text[range]).replacingOccurrences(of: "**", with: "")
-                    if let attrRange = Range(match.range, in: attributedString) {
-                        attributedString.replaceSubrange(attrRange, with: AttributedString(boldText))
-                        if let boldRange = attributedString.range(of: boldText) {
-                            attributedString[boldRange].font = .system(size: 14, weight: .bold)
-                        }
-                    }
-                }
+            // Parse markdown for this paragraph (supports **bold**, *italic*, etc.)
+            if let attributed = try? AttributedString(
+                markdown: trimmed,
+                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            ) {
+                result += attributed
+            } else {
+                result += AttributedString(trimmed)
+            }
+            
+            // Add paragraph separator
+            if index < paragraphs.count - 1 {
+                result += "\n\n"
             }
         }
         
-        return attributedString
+        return result
     }
 }
 
@@ -269,5 +275,5 @@ private struct OptionChip: View {
 }
 
 #Preview {
-    AIAssistantView(vm: AIAssistantViewModel())
+    AIAssistantView(vm: AIAssistantViewModel(), speech: SpeechRecognitionService())
 }

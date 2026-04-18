@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import WebKit
 import SwiftData
+import os
 
 @MainActor
 class BrowserViewModel: NSObject, ObservableObject {
@@ -12,30 +13,28 @@ class BrowserViewModel: NSObject, ObservableObject {
     @Published var canGoForward: Bool = false
     @Published var pageTitle: String = ""
     
-    // 自定义导航历史栈（持久化）
+    // Custom navigation history stack (persistent)
     @Published var navigationHistory: [BrowserHistory] = []
     private var currentHistoryIndex: Int = -1
     private var nextVisitOrder: Int = 0
-    private var isNavigatingInHistory: Bool = false // 标记是否正在历史导航中
+    private var isNavigatingInHistory: Bool = false
     
-    // 单一回调（兼容已有使用）
+    // Page finished callbacks
     var onPageFinished: ((String, String) -> Void)?
-    // 多播回调集合
     private var pageFinishedHandlers: [((String, String) -> Void)] = []
     
     var webView: WKWebView?
     private var progressObserver: NSKeyValueObservation?
     
-    // SwiftData ModelContext reference
     private var modelContext: ModelContext?
     
+    private static let logger = Logger(subsystem: "com.lonesword.browser", category: "Browser")
     
     override init() {
         super.init()
-        print("DEBUG: BrowserViewModel init() called")
+        Self.logger.debug("BrowserViewModel initialized")
         setupWebView()
-        // 应用启动即加载初始 URL
-        print("DEBUG: BrowserViewModel init() calling loadURL with: \(currentURL)")
+        Self.logger.debug("Loading initial URL: \(self.currentURL)")
         loadURL(currentURL)
     }
     
@@ -46,7 +45,6 @@ class BrowserViewModel: NSObject, ObservableObject {
         }
         
         webView = WKWebView(frame: .zero, configuration: config)
-        // Ensure a stable custom UA for all requests
         webView?.customUserAgent = "LoneSword Browser"
         webView?.navigationDelegate = self
         webView?.uiDelegate = self
@@ -54,10 +52,9 @@ class BrowserViewModel: NSObject, ObservableObject {
         
         setupProgressObserver()
         
-        print("DEBUG: setupWebView() completed, webView=\(webView != nil ? "created" : "nil")")
+        Self.logger.debug("WebView created successfully")
     }
 
-    /// Ensure a configured WKWebView exists and return it (used by UI wrapper)
     func ensureWebView() -> WKWebView {
         if let existing = webView { return existing }
         setupWebView()
@@ -91,19 +88,17 @@ class BrowserViewModel: NSObject, ObservableObject {
     
     func loadURL(_ url: String) {
         guard let webView = webView else {
-            print("ERROR: loadURL called but webView is nil!")
+            Self.logger.error("loadURL called but webView is nil")
             return
         }
         
         let processedURL = processURL(url)
-        print("DEBUG: loadURL called with url=\(url), processedURL=\(processedURL)")
+        Self.logger.debug("loadURL: \(url) -> \(processedURL)")
         
         let willPostURLChange = processedURL != self.currentURL
         
-        // 检测URL是否真正变化
         if willPostURLChange {
-            // 触发URL变化通知（在更新currentURL之前）
-            print("DEBUG: loadURL sending URL change notification")
+            Self.logger.debug("Broadcasting URL change notification")
             NotificationCenter.default.post(
                 name: NSNotification.Name("WebViewURLDidChange"),
                 object: nil,
@@ -113,17 +108,16 @@ class BrowserViewModel: NSObject, ObservableObject {
         
         currentURL = processedURL
         
-        // Stop any ongoing load before starting a new one to avoid conflicts
         webView.stopLoading()
         
         if let urlObj = URL(string: processedURL) {
             let request = URLRequest(url: urlObj, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 60)
-            print("DEBUG: loadURL calling webView.load() with URL: \(urlObj)")
+            Self.logger.debug("Loading: \(urlObj.absoluteString)")
             webView.load(request)
             isLoading = true
             loadingProgress = 0
         } else {
-            print("ERROR: Failed to create URL object from: \(processedURL)")
+            Self.logger.error("Failed to create URL object from: \(processedURL)")
         }
     }
     
@@ -150,14 +144,13 @@ class BrowserViewModel: NSObject, ObservableObject {
         currentURL = record.url
         pageTitle = record.title
         
-        // 加载历史URL
         if let url = URL(string: record.url) {
             webView?.load(URLRequest(url: url))
         }
         
         updateNavigationButtonStates()
         
-        print("DEBUG: goBack to index=\(currentHistoryIndex), url=\(record.url)")
+        Self.logger.debug("goBack to index=\(self.currentHistoryIndex), url=\(record.url)")
     }
     
     func goForward() {
@@ -170,27 +163,24 @@ class BrowserViewModel: NSObject, ObservableObject {
         currentURL = record.url
         pageTitle = record.title
         
-        // 加载历史URL
         if let url = URL(string: record.url) {
             webView?.load(URLRequest(url: url))
         }
         
         updateNavigationButtonStates()
         
-        print("DEBUG: goForward to index=\(currentHistoryIndex), url=\(record.url)")
+        Self.logger.debug("goForward to index=\(self.currentHistoryIndex), url=\(record.url)")
     }
     
-    // MARK: - 历史记录管理
+    // MARK: - History Management
     
-    /// 设置 ModelContext 引用
     func setModelContext(_ context: ModelContext) {
         self.modelContext = context
     }
     
-    /// 从 SwiftData 加载最近100条历史记录
     func loadHistoryFromStorage() {
         guard let context = modelContext else {
-            print("DEBUG: ModelContext not set, cannot load history")
+            Self.logger.debug("ModelContext not set, cannot load history")
             return
         }
         
@@ -199,44 +189,27 @@ class BrowserViewModel: NSObject, ObservableObject {
                 sortBy: [SortDescriptor(\.visitOrder, order: .reverse)]
             )
             let allHistory = try context.fetch(descriptor)
-            
-            // 只取最近100条
             let recentHistory = Array(allHistory.prefix(100))
-            
-            // 反转顺序，使最旧的在前，最新的在后
             navigationHistory = recentHistory.reversed()
-            
-            // 设置当前索引为最后一条（最新的）
             currentHistoryIndex = navigationHistory.isEmpty ? -1 : navigationHistory.count - 1
             
-            // 设置下一个 visitOrder
             if let lastOrder = allHistory.first?.visitOrder {
                 nextVisitOrder = lastOrder + 1
             } else {
                 nextVisitOrder = 0
             }
             
-            // 更新导航按钮状态
             updateNavigationButtonStates()
             
-            print("DEBUG: Loaded \(navigationHistory.count) history records, currentIndex=\(currentHistoryIndex)")
-            
-            // 如果历史为空，确保初始URL被加载
-            if navigationHistory.isEmpty && !currentURL.isEmpty {
-                print("DEBUG: History is empty, ensuring initial URL is loaded: \(currentURL)")
-                // 不需要再次调用 loadURL，因为 init() 中已经调用过了
-                // 只需要确保 WebView 已经在加载
-            }
+            Self.logger.debug("Loaded \(self.navigationHistory.count) history records, currentIndex=\(self.currentHistoryIndex)")
         } catch {
-            print("ERROR: Failed to load history: \(error)")
+            Self.logger.error("Failed to load history: \(error.localizedDescription)")
         }
     }
     
-    /// 添加新的历史记录
     private func addToHistory(url: String, title: String) {
         guard let context = modelContext else { return }
         
-        // 如果当前不在最新位置，删除当前位置之后的所有记录
         if currentHistoryIndex < navigationHistory.count - 1 {
             let recordsToRemove = navigationHistory[(currentHistoryIndex + 1)...]
             for record in recordsToRemove {
@@ -245,7 +218,6 @@ class BrowserViewModel: NSObject, ObservableObject {
             navigationHistory.removeSubrange((currentHistoryIndex + 1)...)
         }
         
-        // 创建新记录
         let newRecord = BrowserHistory(
             url: url,
             title: title,
@@ -254,23 +226,16 @@ class BrowserViewModel: NSObject, ObservableObject {
         )
         nextVisitOrder += 1
         
-        // 添加到历史栈
         navigationHistory.append(newRecord)
         currentHistoryIndex = navigationHistory.count - 1
         
-        // 保存到 SwiftData
         context.insert(newRecord)
-        
-        // 限制历史记录数量为100条
         trimHistoryIfNeeded()
-        
-        // 更新导航按钮状态
         updateNavigationButtonStates()
         
-        print("DEBUG: Added history record: \(url), currentIndex=\(currentHistoryIndex)")
+        Self.logger.debug("Added history: \(url), currentIndex=\(self.currentHistoryIndex)")
     }
     
-    /// 限制历史记录最多100条
     private func trimHistoryIfNeeded() {
         guard let context = modelContext else { return }
         
@@ -284,15 +249,13 @@ class BrowserViewModel: NSObject, ObservableObject {
             
             navigationHistory.removeFirst(removeCount)
             currentHistoryIndex -= removeCount
-            print("DEBUG: Trimmed history to 100 records")
+            Self.logger.debug("Trimmed history to 100 records")
         }
     }
     
-    /// 更新前进后退按钮状态
     private func updateNavigationButtonStates() {
         canGoBack = currentHistoryIndex > 0
         canGoForward = currentHistoryIndex < navigationHistory.count - 1
-        print("DEBUG: Navigation state - canGoBack=\(canGoBack), canGoForward=\(canGoForward), index=\(currentHistoryIndex)")
     }
     
     private func processURL(_ urlString: String) -> String {
@@ -318,7 +281,7 @@ class BrowserViewModel: NSObject, ObservableObject {
 
 extension BrowserViewModel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        print("DEBUG: didStartProvisionalNavigation url=\(webView.url?.absoluteString ?? "nil")")
+        Self.logger.debug("didStartProvisionalNavigation: \(webView.url?.absoluteString ?? "nil")")
         DispatchQueue.main.async {
             self.isLoading = true
             self.loadingProgress = 0
@@ -326,14 +289,12 @@ extension BrowserViewModel: WKNavigationDelegate {
     }
     
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        print("DEBUG: didCommit url=\(webView.url?.absoluteString ?? "nil")")
+        Self.logger.debug("didCommit: \(webView.url?.absoluteString ?? "nil")")
         DispatchQueue.main.async {
             let newURL = webView.url?.absoluteString ?? self.currentURL
-            // 检测URL是否真正变化（包括锚点链接）
             if newURL != self.currentURL {
                 self.currentURL = newURL
-                // 触发URL变化通知（作为后备，处理前进/后退/重定向等场景）
-                print("DEBUG: didCommit sending URL change notification")
+                Self.logger.debug("didCommit broadcasting URL change")
                 NotificationCenter.default.post(
                     name: NSNotification.Name("WebViewURLDidChange"),
                     object: nil,
@@ -345,7 +306,7 @@ extension BrowserViewModel: WKNavigationDelegate {
     }
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        print("DEBUG: didFinish url=\(webView.url?.absoluteString ?? "nil"), isNavigatingInHistory=\(isNavigatingInHistory)")
+        Self.logger.debug("didFinish: \(webView.url?.absoluteString ?? "nil")")
         DispatchQueue.main.async {
             self.isLoading = false
             self.loadingProgress = 1.0
@@ -353,15 +314,12 @@ extension BrowserViewModel: WKNavigationDelegate {
             self.currentURL = webView.url?.absoluteString ?? self.currentURL
             
             if !self.currentURL.isEmpty {
-                // 只有在非历史导航时才添加到历史记录
                 if !self.isNavigatingInHistory {
                     self.addToHistory(url: self.currentURL, title: self.pageTitle)
                 } else {
-                    // 重置历史导航标志
                     self.isNavigatingInHistory = false
                 }
                 
-                // 触发回调（用于其他功能，如AI分析）
                 self.onPageFinished?(self.currentURL, self.pageTitle)
                 for handler in self.pageFinishedHandlers { handler(self.currentURL, self.pageTitle) }
             }
@@ -369,24 +327,21 @@ extension BrowserViewModel: WKNavigationDelegate {
     }
     
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        print("DEBUG: didFail error=\(error.localizedDescription)")
+        Self.logger.error("didFail: \(error.localizedDescription)")
         DispatchQueue.main.async {
             self.isLoading = false
             self.loadingProgress = 0
         }
     }
     
-    // 移除内链拦截逻辑，让网页内部链接正常跳转
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let tappedURL = navigationAction.request.url?.absoluteString ?? "nil"
-        print("DEBUG: decidePolicyFor type=\(navigationAction.navigationType.rawValue) url=\(tappedURL) targetFrameIsNil=\(navigationAction.targetFrame == nil)")
-        // 对用户点击的链接进行地址栏与加载状态的即时更新，但不拦截加载
+        Self.logger.debug("decidePolicyFor: type=\(navigationAction.navigationType.rawValue) url=\(tappedURL)")
+        
         if navigationAction.navigationType == .linkActivated,
            let url = navigationAction.request.url?.absoluteString {
-            // 检测URL是否真正变化
             if url != self.currentURL {
-                // 触发URL变化通知（在更新currentURL之前）
-                print("DEBUG: decidePolicyFor sending URL change notification")
+                Self.logger.debug("decidePolicyFor broadcasting URL change")
                 NotificationCenter.default.post(
                     name: NSNotification.Name("WebViewURLDidChange"),
                     object: nil,
@@ -397,18 +352,15 @@ extension BrowserViewModel: WKNavigationDelegate {
             self.isLoading = true
             self.loadingProgress = 0
         }
-        // 允许所有导航，包括内部链接
         decisionHandler(.allow)
     }
 }
 
 extension BrowserViewModel: WKUIDelegate {
-    // 处理 target=_blank 等新窗口打开场景，改为在当前 webView 打开
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard navigationAction.targetFrame == nil, let url = navigationAction.request.url else { return nil }
-        print("DEBUG: createWebViewWith opening in current webView url=\(url.absoluteString)")
+        Self.logger.debug("createWebViewWith: opening \(url.absoluteString) in current webView")
         webView.load(URLRequest(url: url))
         return nil
     }
 }
-
