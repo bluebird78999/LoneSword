@@ -1,0 +1,227 @@
+{
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSwordUITests/LoneSwordUITests.swift": {
+    "mtime": 1760719143.9797575,
+    "ast_hash": "150b4582b37e8e2c303f95768dce6bd0",
+    "semantic_hash": "150b4582b37e8e2c303f95768dce6bd0"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSwordUITests/LoneSwordUITestsLaunchTests.swift": {
+    "mtime": 1760719143.981844,
+    "ast_hash": "a8fea3d6748d287e853d0cc59c16d4f7",
+    "semantic_hash": "a8fea3d6748d287e853d0cc59c16d4f7"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/LoneSwordApp.swift": {
+    "mtime": 1776455228.5272489,
+    "ast_hash": "9ce8ac47ccb380adad7c3e1af306460e",
+    "semantic_hash": "9ce8ac47ccb380adad7c3e1af306460e"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/ContentView.swift": {
+    "mtime": 1776455377.1136494,
+    "ast_hash": "7dc92f435f42acef9b1a13ba09af1aad",
+    "semantic_hash": "7dc92f435f42acef9b1a13ba09af1aad"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/ViewModels/BrowserViewModel.swift": {
+    "mtime": 1776456121.39649,
+    "ast_hash": "88cdebcd66c2de91c468f0f9d98c2e99",
+    "semantic_hash": "88cdebcd66c2de91c468f0f9d98c2e99"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/ViewModels/AIAssistantViewModel.swift": {
+    "mtime": 1776456325.0273225,
+    "ast_hash": "295165fcb82d6ec0181e13de145c76be",
+    "semantic_hash": "295165fcb82d6ec0181e13de145c76be"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Models/AISettings.swift": {
+    "mtime": 1770437889.8940551,
+    "ast_hash": "3d18dde6d6d60a225ec87b8b409ac8fa",
+    "semantic_hash": "3d18dde6d6d60a225ec87b8b409ac8fa"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Models/BrowserHistory.swift": {
+    "mtime": 1761227747.7467084,
+    "ast_hash": "c6d1ee808eda14f6697e0a3c24eba220",
+    "semantic_hash": "c6d1ee808eda14f6697e0a3c24eba220"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Views/SettingsView.swift": {
+    "mtime": 1776456276.3443992,
+    "ast_hash": "8e618f8381774fcf69bea291af838c6b",
+    "semantic_hash": "8e618f8381774fcf69bea291af838c6b"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Views/AIAssistantView.swift": {
+    "mtime": 1776455783.0759175,
+    "ast_hash": "a283818c538081c66aec2314cdeb8a86",
+    "semantic_hash": "a283818c538081c66aec2314cdeb8a86"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Views/WebViewContainer.swift": {
+    "mtime": 1776456271.3532248,
+    "ast_hash": "5cdcc597597f4f8102fb47aeac9796e0",
+    "semantic_hash": "5cdcc597597f4f8102fb47aeac9796e0"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Views/BrowserToolbarView.swift": {
+    "mtime": 1776482514.9949276,
+    "ast_hash": "c4b18f6cee2706226828fa39c8fa8af3",
+    "semantic_hash": "c4b18f6cee2706226828fa39c8fa8af3"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Services/QwenService.swift": {
+    "mtime": 1760779482.2138042,
+    "ast_hash": "084b2a01022b0f03ed824f6b0bafc77f",
+    "semantic_hash": "084b2a01022b0f03ed824f6b0bafc77f"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Services/KeychainService.swift": {
+    "mtime": 1760779482.2136416,
+    "ast_hash": "59033ab17c517203a300567d30a4ceff",
+    "semantic_hash": "59033ab17c517203a300567d30a4ceff"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Services/StoreKitManager.swift": {
+    "mtime": 1760779482.213653,
+    "ast_hash": "283c344140a7d66bc08a4778e0d34e72",
+    "semantic_hash": "283c344140a7d66bc08a4778e0d34e72"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Services/SpeechRecognitionService.swift": {
+    "mtime": 1776455467.617163,
+    "ast_hash": "d618f072a45a47a1ac4ec4025e8b2346",
+    "semantic_hash": "d618f072a45a47a1ac4ec4025e8b2346"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSwordTests/LoneSwordTests.swift": {
+    "mtime": 1760719143.8575974,
+    "ast_hash": "ad97c8ef2c6534ff36f85b74c54e6717",
+    "semantic_hash": "ad97c8ef2c6534ff36f85b74c54e6717"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/URL_CHANGE_TRIGGER_FIX.md": {
+    "mtime": 1760810023.2623348,
+    "ast_hash": "2cd1bdd87a12efe21cde1fdbeb5db30c",
+    "semantic_hash": "2cd1bdd87a12efe21cde1fdbeb5db30c"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/BROWSER_HISTORY_PERSISTENCE.md": {
+    "mtime": 1761227646.5430658,
+    "ast_hash": "6e5ab7d6f17f67c35961376336d63e53",
+    "semantic_hash": "6e5ab7d6f17f67c35961376336d63e53"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/MIGRATION_FIX.md": {
+    "mtime": 1761227868.8623948,
+    "ast_hash": "24c7211eec4738f0fa8f70453555055f",
+    "semantic_hash": "24c7211eec4738f0fa8f70453555055f"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/IMPLEMENTATION_SUMMARY.md": {
+    "mtime": 1760794912.5809653,
+    "ast_hash": "fda422d0162258fc3e35de56a2775ba6",
+    "semantic_hash": "fda422d0162258fc3e35de56a2775ba6"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/PHASE2_PLAN.md": {
+    "mtime": 1760722710.4152467,
+    "ast_hash": "fcb44788eadc6dd27323c530a6061f60",
+    "semantic_hash": "fcb44788eadc6dd27323c530a6061f60"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LAYOUT_FIX_SUMMARY.md": {
+    "mtime": 1760795619.0453086,
+    "ast_hash": "715b49d4361c6146d9ba45721a6d88c4",
+    "semantic_hash": "715b49d4361c6146d9ba45721a6d88c4"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/TEST_CASES.md": {
+    "mtime": 1760809468.7859974,
+    "ast_hash": "c9622d23b5d1395522f46b005096c68e",
+    "semantic_hash": "c9622d23b5d1395522f46b005096c68e"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/PRIVATE_API_KEY_IMPLEMENTATION.md": {
+    "mtime": 1760808738.9326193,
+    "ast_hash": "7c977dfb7215dcadd7857adea022b80b",
+    "semantic_hash": "7c977dfb7215dcadd7857adea022b80b"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/README.md": {
+    "mtime": 1770439298.6795192,
+    "ast_hash": "e94535fa2275000fbfac62393619e611",
+    "semantic_hash": "e94535fa2275000fbfac62393619e611"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/DELIVERY_SUMMARY.md": {
+    "mtime": 1760767164.552737,
+    "ast_hash": "51a133f8605d823733b7028ebddfa166",
+    "semantic_hash": "51a133f8605d823733b7028ebddfa166"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/WEBVIEW_NOT_RENDERING_DEBUG.md": {
+    "mtime": 1761228542.091501,
+    "ast_hash": "0d081e4dd5f16e18750b84fce06c082f",
+    "semantic_hash": "0d081e4dd5f16e18750b84fce06c082f"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/URL_CHANGE_TRIGGER_IMPLEMENTATION.md": {
+    "mtime": 1760809468.7911034,
+    "ast_hash": "e8a557bb186ecc65a2cac7db6bfe3846",
+    "semantic_hash": "e8a557bb186ecc65a2cac7db6bfe3846"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/SETTINGS_UPDATE_SUMMARY.md": {
+    "mtime": 1760794912.5835645,
+    "ast_hash": "d455ef78b3d31d12e77834c4408c86fc",
+    "semantic_hash": "d455ef78b3d31d12e77834c4408c86fc"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/COMPLETION_REPORT.txt": {
+    "mtime": 1760722616.3018749,
+    "ast_hash": "5adba911a32a120eec8232f0fea7eac4",
+    "semantic_hash": "5adba911a32a120eec8232f0fea7eac4"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/TRANSLATION_FEATURE_DISABLED.md": {
+    "mtime": 1761226331.4766264,
+    "ast_hash": "60372de5cbf58c225280486ea3a1c8bb",
+    "semantic_hash": "60372de5cbf58c225280486ea3a1c8bb"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/PHASE2_COMPLETION_REPORT.md": {
+    "mtime": 1760767117.9594674,
+    "ast_hash": "4f7605520a087946bd2f3b4cbed07787",
+    "semantic_hash": "4f7605520a087946bd2f3b4cbed07787"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/QUICK_REFERENCE.md": {
+    "mtime": 1760722710.4157023,
+    "ast_hash": "fb1c32f4674985ca4a1a5d44f5f68c58",
+    "semantic_hash": "fb1c32f4674985ca4a1a5d44f5f68c58"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/docs/ARCHITECTURE.md": {
+    "mtime": 1776455759.0657063,
+    "ast_hash": "3f3432e38944456b419d2ba8c7de9f2e",
+    "semantic_hash": "3f3432e38944456b419d2ba8c7de9f2e"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/IMPLEMENTATION_SUMMARY.md": {
+    "mtime": 1760722710.41527,
+    "ast_hash": "9b071ecdc7cd91583ad945870616b0b3",
+    "semantic_hash": "9b071ecdc7cd91583ad945870616b0b3"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/TESTING_CHECKLIST.md": {
+    "mtime": 1760767077.5414858,
+    "ast_hash": "e93f35b98f2b434bf8501f6d9ab2efee",
+    "semantic_hash": "e93f35b98f2b434bf8501f6d9ab2efee"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Assets.xcassets/AppIcon.appiconset/icon_1024_origin_new 1.png": {
+    "mtime": 1760769312.505673,
+    "ast_hash": "2d8b8ca5ffc8cd993bf5f84ecf17cabd",
+    "semantic_hash": "2d8b8ca5ffc8cd993bf5f84ecf17cabd"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Assets.xcassets/AppIcon.appiconset/icon_1024_origin_new 2.png": {
+    "mtime": 1760769312.505616,
+    "ast_hash": "2d8b8ca5ffc8cd993bf5f84ecf17cabd",
+    "semantic_hash": "2d8b8ca5ffc8cd993bf5f84ecf17cabd"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Assets.xcassets/AppIcon.appiconset/icon_1024_origin_new.png": {
+    "mtime": 1760769312.505435,
+    "ast_hash": "2d8b8ca5ffc8cd993bf5f84ecf17cabd",
+    "semantic_hash": "2d8b8ca5ffc8cd993bf5f84ecf17cabd"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/.graphify_detect.json": {
+    "mtime": 1779293546.0234988,
+    "ast_hash": "d368b7340c89a0ec9bd60552bb3b2717",
+    "semantic_hash": "d368b7340c89a0ec9bd60552bb3b2717"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Assets.xcassets/Contents.json": {
+    "mtime": 1760719140.7014832,
+    "ast_hash": "9deb2ada1cc834bbebf8bbad9c8978a1",
+    "semantic_hash": "9deb2ada1cc834bbebf8bbad9c8978a1"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Assets.xcassets/AppIcon.appiconset/Contents.json": {
+    "mtime": 1760769312.505034,
+    "ast_hash": "16da26d4c6408ae78fdf8f8aa1e215bd",
+    "semantic_hash": "16da26d4c6408ae78fdf8f8aa1e215bd"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/LoneSword/LoneSword/Assets.xcassets/AccentColor.colorset/Contents.json": {
+    "mtime": 1760769312.505276,
+    "ast_hash": "55019f7265dde0a78318b0807f98e847",
+    "semantic_hash": "55019f7265dde0a78318b0807f98e847"
+  },
+  "/Users/liuhongfeng/Desktop/code/LoneSword/AGENTS.md": {
+    "mtime": 1779291915.2957733,
+    "ast_hash": "62c05a2bf20bf036a0b2633478663e64",
+    "semantic_hash": "62c05a2bf20bf036a0b2633478663e64"
+  }
+}

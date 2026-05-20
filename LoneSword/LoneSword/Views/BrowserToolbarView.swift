@@ -8,6 +8,7 @@ struct BrowserToolbarView: View {
     @State private var urlInput: String = ""
     @State private var isEditing: Bool = false
     @State private var lastTapTime: Date = .distantPast
+    @State private var pendingSingleTapWork: DispatchWorkItem?
     @FocusState private var isUrlFieldFocused: Bool
     @State private var showSettingsSheet: Bool = false
     
@@ -125,15 +126,25 @@ struct BrowserToolbarView: View {
     private func handleSlashTap(withInput input: String) {
         Self.logger.debug("Slash tap: \(input)")
         let now = Date()
-        if now.timeIntervalSince(lastTapTime) < 0.3 {
-            // 双击：加载首页
-            Self.logger.debug("Slash double tap")
+        let timeSinceLastTap = now.timeIntervalSince(lastTapTime)
+        
+        if timeSinceLastTap < 0.3 {
+            // 双击：取消待执行的单击，立即加载首页
+            Self.logger.debug("Slash double tap (interval=\(String(format: "%.3f", timeSinceLastTap))s)")
+            pendingSingleTapWork?.cancel()
+            pendingSingleTapWork = nil
             let homeURL = "https://www.google.com/ncr"
             loadURL(homeURL)
         } else {
-            // 单击
-            Self.logger.debug("Slash single tap")
-            loadURL(input)
+            // 单击：延迟执行，等待可能的双击
+            Self.logger.debug("Slash single tap scheduled")
+            pendingSingleTapWork?.cancel()
+            let workItem = DispatchWorkItem { [self] in
+                loadURL(input)
+                pendingSingleTapWork = nil
+            }
+            pendingSingleTapWork = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
         }
         lastTapTime = now
     }

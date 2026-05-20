@@ -1,0 +1,24 @@
+执行一次auto-commit skill
+
+### 主要任务
+执行 auto-commit skill，对本次会话所有变更进行总结并提交到本地 git 仓库
+
+### 执行内容
+- 运行 graphify 完整流水线：分析 LoneSword 项目（152K 词），生成 232 节点/303 边/18 社区知识图谱
+- 创建 auto-commit skill（.trae-cn/skills/auto-commit/SKILL.md）：每次任务完成后自动总结并 git commit
+- 安装 graphify 0.8.13 及全部依赖（tree-sitter、networkx、numpy 等 32 个包）
+- 部署 graphify skill 到 ~/.trae-cn/skills/graphify/
+- 将 graphify 集成规则写入 AGENTS.md
+- 生成知识图谱可视化 graph.html 和审计报告 GRAPH_REPORT.md
+- 达到 334.6x token 压缩率（152K 词 -> ~607 tokens/查询）
+
+### 关键变更
+- .trae-cn/skills/auto-commit/SKILL.md (新增): auto-commit skill 定义文件
+- .trae-cn/skills/graphify/SKILL.md (新增): graphify skill 定义文件
+- .trae-cn/skills/graphify/.graphify_version (新增): graphify 版本标记
+- AGENTS.md (新增): graphify AGENTS.md 集成规则
+- graphify-out/graph.json (新增): 知识图谱数据
+- graphify-out/GRAPH_REPORT.md (新增): 图谱审计报告
+- graphify-out/graph.html (新增): 交互式图谱可视化
+- graphify-out/cost.json (新增): API 成本追踪
+- graphify-out/.graphify_python (新增): Python 解释器路径缓存
